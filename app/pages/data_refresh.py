@@ -42,7 +42,7 @@ with st.expander("⚙️ Nastavení připojení", expanded=True):
             "Sezóna (0 = aktuální)", min_value=0, step=1, value=0
         )
 
-if st.button("🔄 Načíst nejnovější data", type="primary", disabled=not api_key):
+if st.button("🔄 Načíst nejnovější data", type="primary", use_container_width=True, disabled=not api_key):
     if not api_key.strip():
         st.warning("Zadej API klíč.")
     else:

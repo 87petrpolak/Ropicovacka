@@ -40,7 +40,7 @@ with col2:
 with st.expander("Importovat také hráče"):
     players_file = st.file_uploader("players.csv", type="csv", key="players_upload")
 
-if st.button("🚀 Importovat", type="primary"):
+if st.button("🚀 Importovat", type="primary", use_container_width=True):
     if not any([matches_file, stats_file, players_file]):
         st.warning("Nahraj alespoň jeden soubor.")
     else:

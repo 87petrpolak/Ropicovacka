@@ -7,9 +7,26 @@ init_db()
 st.set_page_config(
     page_title="Ropičovačka 2026",
     page_icon="⚽",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
+
+# Responzivní CSS pro mobil
+st.markdown("""
+<style>
+/* Sloupce se skládají pod sebe na mobilech */
+@media (max-width: 640px) {
+    [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: none !important;
+        min-width: 100% !important;
+    }
+}
+/* Tabulky jsou vodorovně scrollovatelné */
+[data-testid="stDataFrame"] { overflow-x: auto; }
+</style>
+""", unsafe_allow_html=True)
 
 pages = [
     st.Page("app/pages/home.py",             title="Domů",              icon="🏠"),

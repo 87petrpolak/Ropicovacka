@@ -125,7 +125,7 @@ color = "green" if count == LINEUP_SIZE else "red"
 st.markdown(f"**Vybráno: :{color}[{count} / {LINEUP_SIZE}]**")
 
 if editable:
-    if st.button("💾 Uložit nominaci", type="primary"):
+    if st.button("💾 Uložit nominaci", type="primary", use_container_width=True):
         try:
             submit_lineup(db, nomination, list(selected_ids), session_id)
             st.success("Nominace byla úspěšně uložena!")

@@ -94,9 +94,10 @@ else:
         for pl in squad:
             by_pos.setdefault(pl.position, []).append(pl)
 
-        cols = st.columns(4)
+        col_a, col_b = st.columns(2)
         for i, pos in enumerate(POS_ORDER):
-            with cols[i]:
+            col = col_a if i < 2 else col_b
+            with col:
                 st.caption(f"**{POS_LABELS[pos]}**")
                 for pl in sorted(by_pos.get(pos, []), key=lambda x: x.name):
                     st.write(pl.name)

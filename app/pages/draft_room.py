@@ -89,12 +89,11 @@ else:
 drafted_ids = draft_engine.get_drafted_player_ids(db, session_id)
 
 # ------------------------------------------------------------------
-# Panel dostupných hráčů
+# Záložky: výběr hráčů | sestavy
 # ------------------------------------------------------------------
-col_left, col_right = st.columns([2, 1])
+tab_pick, tab_squads = st.tabs(["Dostupní hráči", "Sestavy"])
 
-with col_left:
-    st.subheader("Dostupní hráči")
+with tab_pick:
     c1, c2, c3 = st.columns(3)
     with c1:
         countries = sorted({p.country for p in all_players})
@@ -122,7 +121,7 @@ with col_left:
         )
         pick_player = next(p for p in available if p.name == pick_name)
 
-        if st.button("✅ Draftovat hráče", type="primary"):
+        if st.button("✅ Draftovat hráče", type="primary", use_container_width=True):
             try:
                 current_picker = draft_engine.current_picker(draft_session, participants)
                 if current_picker is None:
@@ -134,11 +133,7 @@ with col_left:
             except draft_engine.DraftError as e:
                 st.error(str(e))
 
-# ------------------------------------------------------------------
-# Přehled sestav
-# ------------------------------------------------------------------
-with col_right:
-    st.subheader("Sestavy")
+with tab_squads:
     for p in participants:
         squad = draft_engine.get_participant_squad(db, session_id, p.id)
         with st.expander(f"{p.name} ({len(squad)}/{SQUAD_SIZE})", expanded=False):
