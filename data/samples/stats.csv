@@ -1,0 +1,27 @@
+player_name,player_external_id,match_external_id,goals,assists,played,team_won,clean_sheet
+Kylian Mbappé,fr_mbappe,match_001,1,1,true,true,false
+Antoine Griezmann,fr_griezmann,match_001,1,0,true,true,false
+Mike Maignan,fr_maignan,match_001,0,0,true,true,false
+William Saliba,fr_saliba,match_001,0,0,true,true,false
+Aurélien Tchouaméni,fr_tchouameni,match_001,0,1,true,true,false
+Lionel Messi,arg_messi,match_001,1,0,true,false,false
+Enzo Fernandez,arg_fernandez,match_001,0,1,true,false,false
+Emiliano Martínez,arg_martinez,match_001,0,0,true,false,false
+Lisandro Martínez,arg_lmartinez,match_001,0,0,true,false,false
+Harry Kane,eng_kane,match_002,1,0,true,false,false
+Bukayo Saka,eng_saka,match_002,0,1,true,false,false
+Jordan Pickford,eng_pickford,match_002,0,0,true,false,true
+John Stones,eng_stones,match_002,0,0,true,false,true
+Kyle Walker,eng_walker,match_002,0,0,true,false,true
+Vinicius Jr,bra_vinicius,match_002,1,0,true,false,false
+Raphinha,bra_raphinha,match_002,0,1,true,false,false
+Alisson,bra_alisson,match_002,0,0,true,false,true
+Marquinhos,bra_marquinhos,match_002,0,0,true,false,true
+Cristiano Ronaldo,por_ronaldo,match_003,2,0,true,true,false
+Bernardo Silva,por_bernardo,match_003,0,2,true,true,false
+Bruno Fernandes,por_bruno,match_003,1,0,true,true,false
+Diogo Costa,por_costa,match_003,0,0,true,true,true
+Rúben Dias,por_dias,match_003,0,0,true,true,true
+Erling Haaland,nor_haaland,match_003,0,0,true,false,false
+Martin Ødegaard,nor_odegaard,match_003,0,0,true,false,false
+Ørjan Nyland,nor_nyland,match_003,0,0,true,false,false

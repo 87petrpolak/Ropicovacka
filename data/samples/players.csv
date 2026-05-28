@@ -1,0 +1,32 @@
+name,country,position,club,external_id
+Kylian Mbappé,France,FWD,Real Madrid,fr_mbappe
+Antoine Griezmann,France,MID,Atlético Madrid,fr_griezmann
+Ousmane Dembélé,France,FWD,PSG,fr_dembele
+Mike Maignan,France,GK,AC Milan,fr_maignan
+William Saliba,France,DEF,Arsenal,fr_saliba
+Aurélien Tchouaméni,France,MID,Real Madrid,fr_tchouameni
+Lionel Messi,Argentina,FWD,Inter Miami,arg_messi
+Enzo Fernandez,Argentina,MID,Chelsea,arg_fernandez
+Rodrigo De Paul,Argentina,MID,Atlético Madrid,arg_depaul
+Emiliano Martínez,Argentina,GK,Aston Villa,arg_martinez
+Lisandro Martínez,Argentina,DEF,Manchester United,arg_lmartinez
+Cristiano Ronaldo,Portugal,FWD,Al Nassr,por_ronaldo
+Bernardo Silva,Portugal,MID,Manchester City,por_bernardo
+Bruno Fernandes,Portugal,MID,Manchester United,por_bruno
+Diogo Costa,Portugal,GK,Porto,por_costa
+Rúben Dias,Portugal,DEF,Manchester City,por_dias
+Jude Bellingham,England,MID,Real Madrid,eng_bellingham
+Bukayo Saka,England,MID,Arsenal,eng_saka
+Harry Kane,England,FWD,Bayern Munich,eng_kane
+Jordan Pickford,England,GK,Everton,eng_pickford
+John Stones,England,DEF,Manchester City,eng_stones
+Kyle Walker,England,DEF,Manchester City,eng_walker
+Vinicius Jr,Brazil,FWD,Real Madrid,bra_vinicius
+Rodrygo,Brazil,FWD,Real Madrid,bra_rodrygo
+Raphinha,Brazil,MID,Barcelona,bra_raphinha
+Alisson,Brazil,GK,Liverpool,bra_alisson
+Marquinhos,Brazil,DEF,PSG,bra_marquinhos
+Erling Haaland,Norway,FWD,Manchester City,nor_haaland
+Martin Ødegaard,Norway,MID,Arsenal,nor_odegaard
+Ørjan Nyland,Norway,GK,Brentford,nor_nyland
+Leo Ostigard,Norway,DEF,Napoli,nor_ostigard

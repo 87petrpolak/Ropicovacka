@@ -1,0 +1,173 @@
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+from app.state import get_db, require_active_game
+from app.models.models import Round, Participant, LineupNomination, DraftSession
+from app.services.lineup_manager import lock_lineup, admin_unlock_lineup
+
+st.title("Administrace")
+
+db = get_db()
+game_id = require_active_game()
+if game_id is None:
+    st.stop()
+
+# ----------------------------------------------------------------
+# Kola turnaje
+# ----------------------------------------------------------------
+st.subheader("Kola turnaje")
+
+rounds = db.query(Round).filter(
+    Round.game_id == game_id
+).order_by(Round.round_number).all()
+
+if rounds:
+    rows = [
+        {
+            "ID": r.id,
+            "Číslo kola": r.round_number,
+            "Název": r.name,
+            "Deadline (UTC)": (
+                r.lineup_deadline.strftime("%Y-%m-%d %H:%M") if r.lineup_deadline else "—"
+            ),
+        }
+        for r in rounds
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+else:
+    st.info("Zatím žádná kola.")
+
+with st.expander("➕ Vytvořit kolo"):
+    with st.form("create_round"):
+        r_number = st.number_input(
+            "Číslo kola", min_value=1, step=1, value=len(rounds) + 1
+        )
+        r_name = st.text_input("Název kola", placeholder="Skupina A — 1. kolo")
+        r_deadline_str = st.text_input(
+            "Deadline nominace (RRRR-MM-DD HH:MM UTC, volitelné)",
+            placeholder="2026-06-14 17:00",
+        )
+        if st.form_submit_button("Vytvořit kolo"):
+            deadline_dt = None
+            if r_deadline_str.strip():
+                try:
+                    deadline_dt = datetime.strptime(r_deadline_str.strip(), "%Y-%m-%d %H:%M")
+                except ValueError:
+                    st.error("Neplatný formát deadlinu. Použij RRRR-MM-DD HH:MM.")
+                    st.stop()
+            db.add(Round(
+                game_id=game_id,
+                name=r_name.strip() or f"Kolo {r_number}",
+                round_number=int(r_number),
+                lineup_deadline=deadline_dt,
+            ))
+            db.commit()
+            st.success("Kolo bylo vytvořeno.")
+            st.rerun()
+
+if rounds:
+    with st.expander("✏️ Upravit deadline kola"):
+        sel_round_name = st.selectbox(
+            "Kolo", [r.name for r in rounds], key="edit_round_sel"
+        )
+        sel_round = next(r for r in rounds if r.name == sel_round_name)
+        current_dl = (
+            sel_round.lineup_deadline.strftime("%Y-%m-%d %H:%M")
+            if sel_round.lineup_deadline else ""
+        )
+        new_dl = st.text_input(
+            "Nový deadline (RRRR-MM-DD HH:MM UTC, prázdné = smazat)",
+            value=current_dl,
+            key="edit_dl_input",
+        )
+        if st.button("Uložit deadline"):
+            if new_dl.strip():
+                try:
+                    sel_round.lineup_deadline = datetime.strptime(
+                        new_dl.strip(), "%Y-%m-%d %H:%M"
+                    )
+                    db.commit()
+                    st.success("Deadline uložen.")
+                    st.rerun()
+                except ValueError:
+                    st.error("Neplatný formát. Použij RRRR-MM-DD HH:MM.")
+            else:
+                sel_round.lineup_deadline = None
+                db.commit()
+                st.success("Deadline smazán.")
+                st.rerun()
+
+    with st.expander("🗑️ Smazat kolo"):
+        del_round_name = st.selectbox(
+            "Kolo ke smazání", [r.name for r in rounds], key="del_round_sel"
+        )
+        st.warning("Smazáním kola se odstraní i všechny nominace pro toto kolo.")
+        if st.button("Smazat kolo", type="secondary"):
+            del_round = next(r for r in rounds if r.name == del_round_name)
+            db.delete(del_round)
+            db.commit()
+            st.success(f"Kolo '{del_round_name}' bylo smazáno.")
+            st.rerun()
+
+st.divider()
+
+# ----------------------------------------------------------------
+# Správa nominací
+# ----------------------------------------------------------------
+st.subheader("Správa nominací")
+
+participants = db.query(Participant).filter(
+    Participant.game_id == game_id
+).order_by(Participant.draft_order).all()
+sessions = db.query(DraftSession).filter(
+    DraftSession.game_id == game_id
+).order_by(DraftSession.id.desc()).all()
+
+if rounds and participants and sessions:
+    col1, col2 = st.columns(2)
+    with col1:
+        sel_p_name = st.selectbox("Účastník", [p.name for p in participants], key="admin_p")
+        sel_p = next(p for p in participants if p.name == sel_p_name)
+    with col2:
+        sel_r_name = st.selectbox("Kolo", [r.name for r in rounds], key="admin_r")
+        sel_r = next(r for r in rounds if r.name == sel_r_name)
+
+    nom = db.query(LineupNomination).filter(
+        LineupNomination.participant_id == sel_p.id,
+        LineupNomination.round_id == sel_r.id,
+    ).first()
+
+    if nom:
+        st.write(f"Stav: {'🔒 Zamknutá' if nom.is_locked else '🔓 Odemknutá'}")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🔒 Zamknout nominaci"):
+                lock_lineup(db, nom)
+                st.success("Nominace zamknutá.")
+                st.rerun()
+        with c2:
+            if st.button("🔓 Administrátorsky odemknout"):
+                admin_unlock_lineup(db, nom)
+                st.success("Nominace odemknutá.")
+                st.rerun()
+    else:
+        st.info("Pro tuto kombinaci účastníka a kola zatím nebyla podána nominace.")
+
+    st.divider()
+    st.subheader("Hromadné zamknutí nominací pro kolo")
+    lock_round_name = st.selectbox(
+        "Kolo", [r.name for r in rounds], key="lock_all_round"
+    )
+    lock_round = next(r for r in rounds if r.name == lock_round_name)
+    if st.button("🔒 Zamknout všechny nominace tohoto kola", type="secondary"):
+        noms = db.query(LineupNomination).filter(
+            LineupNomination.round_id == lock_round.id
+        ).all()
+        count = sum(1 for n in noms if not n.is_locked)
+        for n in noms:
+            n.is_locked = True
+        db.commit()
+        st.success(f"Zamknuto {count} nominací.")
+        st.rerun()
+else:
+    st.info("Pro správu nominací potřebuješ alespoň jednoho účastníka, jedno kolo a draft session.")
