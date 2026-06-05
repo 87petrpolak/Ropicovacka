@@ -36,6 +36,10 @@ sessions = db.query(DraftSession).filter(
 
 with st.sidebar:
     st.subheader("Draft")
+    picks_per_participant = st.number_input(
+        "Hráčů na účastníka", min_value=1, max_value=SQUAD_SIZE, value=SQUAD_SIZE, step=1,
+        help=f"Pro testování nastav nižší počet (např. 4). Produkce = {SQUAD_SIZE}.",
+    )
     if sessions:
         sel_session_id = st.selectbox(
             "Vyber draft",
@@ -69,7 +73,7 @@ if draft_session is None:
 # ------------------------------------------------------------------
 # Průběh draftu
 # ------------------------------------------------------------------
-order = draft_engine.build_snake_order(participants, SQUAD_SIZE)
+order = draft_engine.build_snake_order(participants, picks_per_participant)
 total_picks = len(order)
 done_picks = draft_session.current_pick_index
 progress = done_picks / total_picks if total_picks else 0

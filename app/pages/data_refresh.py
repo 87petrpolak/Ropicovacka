@@ -36,7 +36,6 @@ with tab_live:
         with st.spinner("Načítám data z Livesport.cz…"):
             try:
                 result = run_refresh(db, provider, game_id, import_players=False, import_matches=True)
-                _show_result(result) if False else None  # volá se níže
                 if result.errors:
                     st.error("Chyby:\n\n" + "\n".join(f"- {e}" for e in result.errors))
                 else:

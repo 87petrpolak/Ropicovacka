@@ -8,14 +8,24 @@ st.title("Import soupisek z Livesport.cz")
 
 db = get_db()
 
-# Přednastavené týmy — přidej další dle potřeby
+# Přednastavené týmy
 PRESET_TEAMS = {
-    "Arsenal": ("arsenal", "hA1Zm19f"),
-    "Manchester Utd": ("manchester-utd", "ppjDR086"),
-    "Liverpool": ("liverpool", "lId4TMwf"),
-    "Manchester City": ("manchester-city", "dea09qJB"),
-    "Chelsea": ("chelsea", "h0IFzgMi"),
-    "Tottenham": ("tottenham-hotspur", "CpNDWYUn"),
+    # MS 2026 — národní týmy
+    "Francie":       ("francie",      "QkGeVG1n"),
+    "Španělsko":     ("spanelsko",   "bLyo6mco"),
+    "Anglie":        ("anglie",      "j9N9ZNFA"),
+    "Portugalsko":   ("portugalsko", "WvJrjFVN"),
+    "Argentina":     ("argentina",   "f9OppQjp"),
+    "Brazílie":      ("brazilie",    "I9l9aqLq"),
+    "Německo":       ("nemecko",     "ptQide1O"),
+    "Nizozemsko":    ("nizozemsko",  "WYintcWb"),
+    "Norsko":        ("norsko",      "8rP6JO0H"),
+    "Belgie":        ("belgie",      "GbB957na"),
+    "Kolumbie":      ("kolumbie",    "G02s4PCS"),
+    # PL kluby (testování)
+    "Arsenal":           ("arsenal",           "hA1Zm19f"),
+    "Manchester Utd":    ("manchester-utd",     "ppjDR086"),
+    "Liverpool":         ("liverpool",          "lId4TMwf"),
 }
 
 st.markdown(
@@ -29,7 +39,7 @@ with col1:
     selected = st.multiselect(
         "Vyber týmy k importu",
         options=list(PRESET_TEAMS.keys()),
-        default=["Arsenal", "Manchester Utd", "Liverpool"],
+        default=["Francie", "Španělsko", "Anglie", "Portugalsko", "Argentina", "Brazílie", "Německo", "Nizozemsko", "Norsko", "Belgie", "Kolumbie"],
     )
 
 with col2:

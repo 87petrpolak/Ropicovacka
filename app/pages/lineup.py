@@ -112,7 +112,7 @@ for pos in POS_ORDER:
     st.caption(f"**{POS_LABELS[pos]}** — {POS_INFO.get(pos, '')}")
     for pl in sorted(pos_players, key=lambda x: x.name):
         checked = st.checkbox(
-            f"{pl.name} ({pl.country})",
+            f"{pl.name} ({pl.club or pl.country})",
             value=pl.id in current_ids,
             key=f"ln_{nomination.id}_{pl.id}",
             disabled=not editable,
