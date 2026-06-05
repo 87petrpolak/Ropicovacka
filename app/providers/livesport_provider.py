@@ -8,35 +8,55 @@ Endpointy:
   f_1_0_2_cs_1          — dnešní/aktuální výsledky všech fotbalových zápasů
   dc_1_{matchId}         — metadata zápasu (skóre, čas, týmy)
   df_sui_1_{matchId}     — incidents: góly, asistence, střídání, karty
+  (soupiska)             — HTML stránka týmu /tym/{slug}/{teamId}/soupiska/
 
 Minuty na hřišti:
   Nastoupil od začátku = 90 min (pokud nebyl střídán ven)
   Střídán ven v min X  = X minut
   Střídán dovnitř v min X = (90 - X) minut
-  Nastoupil od začátku ale střídán dovnitř/ven = kombinace
 """
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 from typing import Optional
 
 import requests
+from bs4 import BeautifulSoup
 
 from app.providers.base import BaseFootballDataProvider, PlayerData, MatchData, PlayerStatsData
 
 _BASE = "https://1.flashscore.ninja/1/x/feed"
+_LIVESPORT_BASE = "https://www.livesport.cz"
 _HEADERS = {
     "x-fsign": "SW9D1eZo",
     "Referer": "https://www.livesport.cz/",
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
 }
-_REQUEST_DELAY = 1.0  # sekundy mezi requesty
+_HTML_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "Accept-Language": "cs-CZ,cs;q=0.9",
+    "Referer": "https://www.livesport.cz/",
+}
+_REQUEST_DELAY = 1.0
 
 # Flashscore tournament ID pro MS 2026
 WC_2026_TOURNAMENT_ID = "zeSHfCx3"
 
-# Typy incidentů v df_sui feedu
+# Mapování českých pozic na interní enum
+_POS_MAP = {
+    "brankáři": "GK",
+    "brankář": "GK",
+    "obránci": "DEF",
+    "obránce": "DEF",
+    "záložníci": "MID",
+    "záložník": "MID",
+    "útočníci": "FWD",
+    "útočník": "FWD",
+}
+
+# Typy incidentů
 _INCIDENT_GOAL = "Gól"
 _INCIDENT_OWN_GOAL = "Vlastní gól"
 _INCIDENT_SUB_IN = "Střídání"
@@ -46,6 +66,13 @@ _INCIDENT_SUB_OUT = "Střídání - Out"
 def _fetch(path: str) -> str:
     url = f"{_BASE}/{path}"
     resp = requests.get(url, headers=_HEADERS, timeout=15)
+    resp.raise_for_status()
+    time.sleep(_REQUEST_DELAY)
+    return resp.text
+
+
+def _fetch_html(url: str) -> str:
+    resp = requests.get(url, headers=_HTML_HEADERS, timeout=15)
     resp.raise_for_status()
     time.sleep(_REQUEST_DELAY)
     return resp.text
@@ -69,7 +96,7 @@ def _parse_feed(raw: str) -> list[dict]:
 
 
 def _parse_minute(minute_str: str) -> int:
-    """'75'' → 75, '90+2'' → 92, '45+3'' → 48"""
+    """'75'' → 75, '90+2'' → 92"""
     s = minute_str.replace("'", "").strip()
     if "+" in s:
         base, extra = s.split("+", 1)
@@ -83,32 +110,131 @@ def _parse_minute(minute_str: str) -> int:
         return 0
 
 
+def scrape_squad(team_slug: str, team_id: str, team_name: str) -> list[PlayerData]:
+    """
+    Stáhne soupisku týmu ze stránky Livesport.cz/tym/{slug}/{id}/soupiska/
+    Vrátí seznam PlayerData s pozicí, jménem a external_id.
+    """
+    url = f"{_LIVESPORT_BASE}/tym/{team_slug}/{team_id}/soupiska/"
+    html = _fetch_html(url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    players = []
+    seen_ids: set[str] = set()
+    current_pos = None
+    in_players_section = False  # jen GK/DEF/MID/FWD sekce, ne trenéři
+
+    for el in soup.select(".lineupTable .lineupTable__title, .lineupTable .lineupTable__row"):
+        if "lineupTable__title" in el.get("class", []):
+            title = el.get_text().strip().lower()
+            pos = _POS_MAP.get(title)
+            if pos:
+                current_pos = pos
+                in_players_section = True
+            else:
+                in_players_section = False  # trenéři / kouči
+            continue
+
+        if not in_players_section:
+            continue
+
+        link = el.select_one('a[href*="/hrac/"]')
+        if not link:
+            continue
+
+        name = link.get_text().strip()
+        href = link.get("href", "")
+        m = re.search(r"/hrac/[^/]+/([A-Za-z0-9]+)/", href)
+        player_id = m.group(1) if m else None
+
+        if not name or not player_id:
+            continue
+        if player_id in seen_ids:
+            continue
+        seen_ids.add(player_id)
+
+        players.append(PlayerData(
+            name=name,
+            country="",
+            position=current_pos,
+            club=team_name,
+            external_id=player_id,
+        ))
+
+    return players
+
+
+def fetch_match_metadata(match_id: str) -> dict:
+    """Načte základní metadata zápasu (skóre, týmy, čas) přes dc_ endpoint."""
+    raw = _fetch(f"dc_1_{match_id}")
+    records = _parse_feed(raw)
+    return records[0] if records else {}
+
+
 class LivesportProvider(BaseFootballDataProvider):
     """
     Scraper pro livesport.cz (Flashscore backend).
 
-    tournament_id: Flashscore ID turnaje (default = MS 2026)
+    Dva režimy:
+      - tournament_id: filtruje dnešní feed podle turnaje (pro živé MS zápasy)
+      - match_ids: přímý import konkrétních historických zápasů
     """
 
     def __init__(
         self,
         tournament_id: str = WC_2026_TOURNAMENT_ID,
-        request_delay: float = _REQUEST_DELAY,
+        match_ids: Optional[list[str]] = None,
     ):
         self.tournament_id = tournament_id
-        _HEADERS  # použito globálně, delay se aplikuje v _fetch
+        self.match_ids = match_ids  # pokud je zadáno, ignoruje tournament_id a dnešní feed
 
     def fetch_players(self) -> list[PlayerData]:
-        # Hráče importujeme přes CSV — Flashscore nemá roster endpoint v free feedu
         return []
 
     def fetch_matches(self, since: Optional[datetime] = None) -> list[MatchData]:
         """
-        Vrátí dokončené zápasy turnaje.
-
-        Flashscore obecný feed (f_1_0_2_cs_1) obsahuje všechny dnešní výsledky.
-        Pro historická data nebo konkrétní turnaj musíme filtrovat přes tournament feed.
+        Pokud jsou zadány match_ids — načte tato konkrétní historická utkání.
+        Jinak prochází dnešní feed a filtruje podle tournament_id.
         """
+        if self.match_ids:
+            return self._fetch_matches_by_ids(self.match_ids)
+        return self._fetch_from_live_feed(since)
+
+    def _fetch_matches_by_ids(self, match_ids: list[str]) -> list[MatchData]:
+        """Načte metadata pro každý match_id zvlášť přes dc_ endpoint."""
+        matches = []
+        for match_id in match_ids:
+            meta = fetch_match_metadata(match_id)
+            if not meta:
+                continue
+
+            home_score = int(meta.get("DG", 0) or 0)
+            away_score = int(meta.get("DH", 0) or 0)
+
+            played_at = None
+            raw_ts = meta.get("DC", "")
+            if raw_ts:
+                try:
+                    played_at = datetime.utcfromtimestamp(int(raw_ts))
+                except (ValueError, OSError):
+                    pass
+
+            # Týmy z dc_ endpointu nejsou přímo dostupné — použijeme match_id jako placeholder
+            # Skutečné názvy týmů načteme z incidents feedu pokud jsou potřeba
+            matches.append(MatchData(
+                home_team="",
+                away_team="",
+                home_score=home_score,
+                away_score=away_score,
+                played_at=played_at,
+                external_id=match_id,
+                is_finished=True,
+            ))
+
+        return matches
+
+    def _fetch_from_live_feed(self, since: Optional[datetime]) -> list[MatchData]:
+        """Prochází dnešní feed a vrací dokončené zápasy daného turnaje."""
         raw = _fetch("f_1_0_2_cs_1")
         records = _parse_feed(raw)
 
@@ -116,20 +242,13 @@ class LivesportProvider(BaseFootballDataProvider):
         current_tournament_id = None
 
         for rec in records:
-            # ZEE = tournament external ID (začátek sekce turnaje)
             if "ZEE" in rec:
                 current_tournament_id = rec.get("ZEE", "")
                 continue
-
-            # AA = match ID (zápasový záznam)
             if "AA" not in rec:
                 continue
-
-            # Filtrujeme jen náš turnaj, pokud je nastaven
             if self.tournament_id and current_tournament_id != self.tournament_id:
                 continue
-
-            # AB÷3 = zápas dokončen
             if rec.get("AB") != "3":
                 continue
 
@@ -144,14 +263,11 @@ class LivesportProvider(BaseFootballDataProvider):
             if since and played_at and played_at <= since:
                 continue
 
-            home_score = int(rec.get("AG", 0) or 0)
-            away_score = int(rec.get("AH", 0) or 0)
-
             matches.append(MatchData(
                 home_team=rec.get("AE", ""),
                 away_team=rec.get("AF", ""),
-                home_score=home_score,
-                away_score=away_score,
+                home_score=int(rec.get("AG", 0) or 0),
+                away_score=int(rec.get("AH", 0) or 0),
                 played_at=played_at,
                 external_id=rec["AA"],
                 is_finished=True,
@@ -160,97 +276,18 @@ class LivesportProvider(BaseFootballDataProvider):
         return matches
 
     def fetch_player_stats(self, match_external_id: str) -> list[PlayerStatsData]:
-        """
-        Načte góly, asistence a minuty na hřišti pro daný zápas.
-        Vrací záznamy jen pro hráče kteří skórovali, nahrávali nebo byli střídáni.
-        Hráči co odehráli celý zápas bez incidentů zde nebudou — je potřeba je doplnit
-        ze sestavy (CSV import).
-        """
-        # Nejdřív metadata zápasu (skóre pro výhru/čisté konto)
-        dc_raw = _fetch(f"dc_1_{match_external_id}")
-        dc = _parse_feed(dc_raw)
-        match_meta = dc[0] if dc else {}
+        """Načte góly, asistence a minuty na hřišti pro daný zápas."""
+        meta = fetch_match_metadata(match_external_id)
+        home_score = int(meta.get("DG", 0) or 0)
+        away_score = int(meta.get("DH", 0) or 0)
 
-        home_score = int(match_meta.get("DG", 0) or 0)
-        away_score = int(match_meta.get("DH", 0) or 0)
-
-        # Incidents feed
-        raw = _fetch(f"df_sui_1_{match_external_id}")
-        records = _parse_feed(raw)
-
-        # IA÷1 = domácí tým, IA÷2 = hosté
         home_won = home_score > away_score
         away_won = away_score > home_score
         home_clean = away_score == 0
         away_clean = home_score == 0
 
-        # Sbíráme data per hráč (player_url jako klíč)
-        players: dict[str, dict] = {}
-
-        # Sledujeme sekci poločasu (AC = poločas header)
-        current_section = None
-        match_duration = 90  # základní hrací doba
-
-        for rec in records:
-            if "AC" in rec:
-                current_section = rec["AC"]
-                continue
-
-            if "III" not in rec:
-                continue
-
-            incident_type = rec.get("IK", "")
-            team_side = rec.get("IA", "")  # "1" = domácí, "2" = hosté
-            player_name = rec.get("IF", "").strip()
-            player_url = rec.get("IU", "").strip()
-            player_id = rec.get("IM", "").strip()
-            minute = _parse_minute(rec.get("IB", "0"))
-
-            if not player_name:
-                continue
-
-            key = player_url or player_name
-            if key not in players:
-                team_won = (team_side == "1" and home_won) or (team_side == "2" and away_won)
-                clean_sheet = (team_side == "1" and home_clean) or (team_side == "2" and away_clean)
-                players[key] = {
-                    "player_external_id": player_id or None,
-                    "player_name": player_name,
-                    "match_external_id": match_external_id,
-                    "goals": 0,
-                    "assists": 0,
-                    "played": True,
-                    "minutes_played": match_duration,  # default = celý zápas, upravíme při střídání
-                    "team_won": team_won,
-                    "clean_sheet": clean_sheet,
-                    "_sub_out_minute": None,
-                    "_sub_in_minute": None,
-                    "_team_side": team_side,
-                }
-
-            p = players[key]
-
-            if incident_type == _INCIDENT_GOAL:
-                p["goals"] += 1
-
-            elif incident_type == "Asistace" or (incident_type == _INCIDENT_GOAL and rec.get("INX")):
-                # Asistence může být jako samostatný záznam nebo inline v gólu
-                # INX přítomný = asistující hráč je v dalším záznamu
-                pass
-
-            elif incident_type == _INCIDENT_SUB_OUT:
-                p["_sub_out_minute"] = minute
-                p["minutes_played"] = minute
-
-            elif incident_type == _INCIDENT_SUB_IN:
-                p["_sub_in_minute"] = minute
-                p["minutes_played"] = match_duration - minute
-                p["played"] = True
-
-        # Druhý průchod pro asistence — jsou linkované s gólem přes INX/IOX
-        # Ve feedu je asistující hráč ve vedlejším záznamu (IE÷ a IF÷ v rámci téhož bloku)
-        raw2 = _fetch(f"df_sui_1_{match_external_id}")
-        self._parse_assists(raw2, players, match_external_id, home_won, away_won, home_clean, away_clean, match_duration)
+        raw = _fetch(f"df_sui_1_{match_external_id}")
+        players = self._parse_incidents(raw, match_external_id, home_won, away_won, home_clean, away_clean)
 
         return [
             PlayerStatsData(
@@ -267,85 +304,82 @@ class LivesportProvider(BaseFootballDataProvider):
             for p in players.values()
         ]
 
-    def _parse_assists(
+    def _parse_incidents(
         self,
         raw: str,
-        players: dict,
-        match_external_id: str,
+        match_id: str,
         home_won: bool,
         away_won: bool,
         home_clean: bool,
         away_clean: bool,
-        match_duration: int,
-    ) -> None:
-        """
-        Ve Flashscore feedu jsou asistence zakódovány takto v gólové události:
-          IE÷3¬INX÷1¬IOX÷0¬IF÷<střelec>¬IU÷<url>¬ICT÷¬IK÷Gól¬IM÷<id>
-          IE÷... (druhý výskyt IF) = asistující hráč
-        Přesněji: blok obsahuje opakující se IF÷/IU÷/IK÷ páry pro střelce i asistenta.
-        Parsujeme raw znovu, tentokrát extrahujeme asistenta z gólového bloku.
-        """
+        match_duration: int = 90,
+    ) -> dict:
+        players: dict[str, dict] = {}
+
+        def _get_or_create(key: str, name: str, pid: str, team_side: str) -> dict:
+            if key not in players:
+                team_won = (team_side == "1" and home_won) or (team_side == "2" and away_won)
+                clean_sheet = (team_side == "1" and home_clean) or (team_side == "2" and away_clean)
+                players[key] = {
+                    "player_external_id": pid or None,
+                    "player_name": name,
+                    "match_external_id": match_id,
+                    "goals": 0,
+                    "assists": 0,
+                    "played": True,
+                    "minutes_played": match_duration,
+                    "team_won": team_won,
+                    "clean_sheet": clean_sheet,
+                    "_team_side": team_side,
+                }
+            return players[key]
+
         for block in raw.split("~"):
-            if "IK÷Gól" not in block and "IK÷gól" not in block.lower():
+            if "III÷" not in block:
                 continue
 
-            pairs = block.split("¬")
-            team_side = ""
-            ie_entries: list[tuple[str, str, str, str]] = []  # (IE, IF, IU, IK)
-
-            i = 0
-            current_ie = ""
-            current_if = ""
-            current_iu = ""
-            current_im = ""
-            current_ik = ""
-
-            for pair in pairs:
+            # Parsuj celý blok jako klíč-hodnota
+            kv: dict[str, list[str]] = {}
+            for pair in block.split("¬"):
                 if "÷" not in pair:
                     continue
                 k, _, v = pair.partition("÷")
-                if k == "IA":
-                    team_side = v
-                elif k == "IE":
-                    # Nový hráč v bloku — ulož předchozího
-                    if current_if:
-                        ie_entries.append((current_ie, current_if, current_iu, current_im, current_ik))
-                    current_ie = v
-                    current_if = ""
-                    current_iu = ""
-                    current_im = ""
-                    current_ik = ""
-                elif k == "IF":
-                    current_if = v.strip()
-                elif k == "IU":
-                    current_iu = v.strip()
-                elif k == "IM":
-                    current_im = v.strip()
-                elif k == "IK":
-                    current_ik = v.strip()
+                kv.setdefault(k, []).append(v)
 
-            if current_if:
-                ie_entries.append((current_ie, current_if, current_iu, current_im, current_ik))
+            team_side = kv.get("IA", [""])[0]
+            minute = _parse_minute(kv.get("IB", ["0"])[0])
 
-            # ie_entries[0] = střelec (IK=Gól), ie_entries[1] = asistent (IK=Asistace nebo prázdný)
-            for ie, name, url, pid, ik in ie_entries:
-                if ik in ("Asistace", "Asistence", "") and name:
-                    key = url or name
-                    if key not in players:
-                        team_won = (team_side == "1" and home_won) or (team_side == "2" and away_won)
-                        clean_sheet = (team_side == "1" and home_clean) or (team_side == "2" and away_clean)
-                        players[key] = {
-                            "player_external_id": pid or None,
-                            "player_name": name,
-                            "match_external_id": match_external_id,
-                            "goals": 0,
-                            "assists": 0,
-                            "played": True,
-                            "minutes_played": match_duration,
-                            "team_won": team_won,
-                            "clean_sheet": clean_sheet,
-                            "_sub_out_minute": None,
-                            "_sub_in_minute": None,
-                            "_team_side": team_side,
-                        }
-                    players[key]["assists"] += 1
+            # Každý blok může mít více IE/IF/IU/IM/IK záznamů (střelec + asistent)
+            ie_list = kv.get("IE", [])
+            if_list = kv.get("IF", [])
+            iu_list = kv.get("IU", [])
+            im_list = kv.get("IM", [])
+            ik_list = kv.get("IK", [])
+
+            for i, ik in enumerate(ik_list):
+                name = if_list[i] if i < len(if_list) else ""
+                url = iu_list[i] if i < len(iu_list) else ""
+                pid = im_list[i] if i < len(im_list) else ""
+                name = name.strip()
+                if not name:
+                    continue
+
+                key = url.strip() or name
+
+                if ik == _INCIDENT_GOAL:
+                    p = _get_or_create(key, name, pid, team_side)
+                    p["goals"] += 1
+
+                elif ik in ("Asistence", "Asistace"):
+                    p = _get_or_create(key, name, pid, team_side)
+                    p["assists"] += 1
+
+                elif ik == _INCIDENT_SUB_OUT:
+                    p = _get_or_create(key, name, pid, team_side)
+                    p["minutes_played"] = minute
+
+                elif ik == _INCIDENT_SUB_IN:
+                    p = _get_or_create(key, name, pid, team_side)
+                    p["minutes_played"] = match_duration - minute
+
+        return players

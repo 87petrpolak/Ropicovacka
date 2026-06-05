@@ -32,6 +32,7 @@ pages = [
     st.Page("app/pages/home.py",             title="Domů",              icon="🏠"),
     st.Page("app/pages/participants.py",     title="Účastníci",         icon="👥"),
     st.Page("app/pages/players.py",          title="Hráči",             icon="⚽"),
+    st.Page("app/pages/squad_import.py",     title="Import soupisek",   icon="📋"),
     st.Page("app/pages/draft_room.py",       title="Draft",             icon="🎯"),
     st.Page("app/pages/squads.py",           title="Sestavy",           icon="🗂️"),
     st.Page("app/pages/lineup.py",           title="Nominace",          icon="📋"),
