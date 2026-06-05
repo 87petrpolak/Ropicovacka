@@ -150,6 +150,7 @@ class PlayerMatchStats(Base):
     goals: Mapped[int] = mapped_column(Integer, default=0)
     assists: Mapped[int] = mapped_column(Integer, default=0)
     played: Mapped[bool] = mapped_column(Boolean, default=False)
+    minutes_played: Mapped[int] = mapped_column(Integer, default=0)
     team_won: Mapped[bool] = mapped_column(Boolean, default=False)
     clean_sheet: Mapped[bool] = mapped_column(Boolean, default=False)
     computed_points: Mapped[float] = mapped_column(Float, default=0.0)

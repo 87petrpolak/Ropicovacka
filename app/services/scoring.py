@@ -2,13 +2,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from app.models.models import Position, PlayerMatchStats, PointsRule
 
+MIN_MINUTES_FOR_BONUS = 60
 
 DEFAULT_RULES = {
-    "goal": 25.0,
-    "assist": 20.0,
-    "team_win": 10.0,
-    "defender_clean_sheet": 10.0,
-    "goalkeeper_clean_sheet": 25.0,
+    "goal": 30.0,
+    "assist": 25.0,
+    "mid_team_win": 15.0,
+    "def_team_win": 15.0,
+    "defender_clean_sheet": 15.0,
+    "goalkeeper_clean_sheet": 30.0,
 }
 
 
@@ -38,14 +40,23 @@ def compute_points(
     bd.goals_pts = stats.goals * r["goal"]
     bd.assists_pts = stats.assists * r["assist"]
 
-    if stats.team_won:
-        bd.team_win_pts = r["team_win"]
+    qualified = stats.minutes_played >= MIN_MINUTES_FOR_BONUS
 
-    if stats.clean_sheet:
-        if position == Position.GK:
-            bd.clean_sheet_pts = r["goalkeeper_clean_sheet"]
-        elif position == Position.DEF:
+    if position == Position.MID:
+        if stats.team_won and qualified:
+            bd.team_win_pts = r["mid_team_win"]
+
+    elif position == Position.DEF:
+        if stats.team_won and qualified:
+            bd.team_win_pts = r["def_team_win"]
+        if stats.clean_sheet and qualified:
             bd.clean_sheet_pts = r["defender_clean_sheet"]
+
+    elif position == Position.GK:
+        if stats.clean_sheet and qualified:
+            bd.clean_sheet_pts = r["goalkeeper_clean_sheet"]
+
+    # FWD: pouze góly a asistence, žádné bonusy za výhru/čisté konto
 
     return bd
 
@@ -54,9 +65,11 @@ def rules_from_db(db_rules: list[PointsRule]) -> dict:
     mapping = {
         "goal": "goal",
         "assist": "assist",
-        "team_win": "team_win",
+        "mid_team_win": "mid_team_win",
+        "def_team_win": "def_team_win",
         "defender_clean_sheet": "defender_clean_sheet",
         "goalkeeper_clean_sheet": "goalkeeper_clean_sheet",
+        "team_win": "mid_team_win",  # zpětná kompatibilita
     }
     result = {}
     for rule in db_rules:

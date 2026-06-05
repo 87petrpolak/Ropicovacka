@@ -34,6 +34,7 @@ class PlayerStatsData:
     goals: int = 0
     assists: int = 0
     played: bool = False
+    minutes_played: int = 0
     team_won: bool = False
     clean_sheet: bool = False
 

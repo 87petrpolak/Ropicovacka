@@ -143,6 +143,7 @@ def _upsert_stats(db: Session, sd, match: Match, result: RefreshResult):
             goals=sd.goals,
             assists=sd.assists,
             played=sd.played,
+            minutes_played=sd.minutes_played,
             team_won=sd.team_won,
             clean_sheet=sd.clean_sheet,
         ))
@@ -151,6 +152,7 @@ def _upsert_stats(db: Session, sd, match: Match, result: RefreshResult):
         existing.goals = sd.goals
         existing.assists = sd.assists
         existing.played = sd.played
+        existing.minutes_played = sd.minutes_played
         existing.team_won = sd.team_won
         existing.clean_sheet = sd.clean_sheet
         result.stats_updated += 1
