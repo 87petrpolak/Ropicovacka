@@ -276,7 +276,11 @@ class LivesportProvider(BaseFootballDataProvider):
         return matches
 
     def fetch_player_stats(self, match_external_id: str) -> list[PlayerStatsData]:
-        """Načte góly, asistence a minuty na hřišti pro daný zápas."""
+        """
+        Načte stats pro daný zápas kombinací:
+          1. df_li_ — základní sestavy (kdo nastoupil, minuty ze střídání)
+          2. df_sui_ — incidenty (góly, asistence, upřesnění střídání)
+        """
         meta = fetch_match_metadata(match_external_id)
         home_score = int(meta.get("DG", 0) or 0)
         away_score = int(meta.get("DH", 0) or 0)
@@ -286,8 +290,13 @@ class LivesportProvider(BaseFootballDataProvider):
         home_clean = away_score == 0
         away_clean = home_score == 0
 
-        raw = _fetch(f"df_sui_1_{match_external_id}")
-        players = self._parse_incidents(raw, match_external_id, home_won, away_won, home_clean, away_clean)
+        # 1. Základní sestavy — každý hráč se základem dostane played=True, minutes=90
+        lineup_raw = _fetch(f"df_li_1_{match_external_id}")
+        players = self._parse_lineup(lineup_raw, match_external_id, home_won, away_won, home_clean, away_clean)
+
+        # 2. Incidenty — přičti góly/asistence, upřesni minuty ze střídání
+        incidents_raw = _fetch(f"df_sui_1_{match_external_id}")
+        self._apply_incidents(incidents_raw, players, match_external_id, home_won, away_won, home_clean, away_clean)
 
         return [
             PlayerStatsData(
@@ -304,7 +313,7 @@ class LivesportProvider(BaseFootballDataProvider):
             for p in players.values()
         ]
 
-    def _parse_incidents(
+    def _parse_lineup(
         self,
         raw: str,
         match_id: str,
@@ -314,8 +323,85 @@ class LivesportProvider(BaseFootballDataProvider):
         away_clean: bool,
         match_duration: int = 90,
     ) -> dict:
+        """
+        Parsuje df_li_ feed.
+        LC÷1 = domácí tým, LC÷2 = hosté (odděluje bloky)
+        LK÷1 = základní sestava, LK÷2 = náhradník (nenastoupil)
+        LP = player external ID, LI = jméno
+        LIT = minuta střídání ven (např. "46'"), LIN = náhradník
+        """
         players: dict[str, dict] = {}
+        current_side = "1"  # LC÷1=domácí, LC÷2=hosté
 
+        for block in raw.split("~"):
+            kv: dict[str, str] = {}
+            for pair in block.split("¬"):
+                if "÷" in pair:
+                    k, _, v = pair.partition("÷")
+                    kv[k] = v
+
+            # Přepnutí strany
+            if "LC" in kv and "LP" not in kv:
+                current_side = kv["LC"]
+                continue
+
+            # Hráč
+            if "LP" not in kv or "LI" not in kv:
+                continue
+
+            is_starter = kv.get("LK") == "1"
+            if not is_starter:
+                continue
+
+            pid = kv["LP"]
+            name = kv["LI"].strip()
+            key = pid or name
+
+            team_won = (current_side == "1" and home_won) or (current_side == "2" and away_won)
+            clean_sheet = (current_side == "1" and home_clean) or (current_side == "2" and away_clean)
+
+            # Minuty: pokud má LIT (střídán ven), přečti minutu
+            minutes = match_duration
+            sub_out_str = kv.get("LIT", "")
+            if sub_out_str:
+                # LIT může být "46'" nebo "46' Gabriel Jesus (Martinelli G.)" — bereme číslo
+                m = re.match(r"(\d+)[\+\d]*'?", sub_out_str.strip())
+                if m:
+                    minutes = int(m.group(1))
+                    extra = re.search(r"\+(\d+)'", sub_out_str)
+                    if extra:
+                        minutes += int(extra.group(1))
+
+            players[key] = {
+                "player_external_id": pid or None,
+                "player_name": name,
+                "match_external_id": match_id,
+                "goals": 0,
+                "assists": 0,
+                "played": True,
+                "minutes_played": minutes,
+                "team_won": team_won,
+                "clean_sheet": clean_sheet,
+                "_side": current_side,
+            }
+
+        return players
+
+    def _apply_incidents(
+        self,
+        raw: str,
+        players: dict,
+        match_id: str,
+        home_won: bool,
+        away_won: bool,
+        home_clean: bool,
+        away_clean: bool,
+        match_duration: int = 90,
+    ) -> None:
+        """
+        Přidá góly/asistence z df_sui_ feedu.
+        Hráče kteří nastoupili jako náhradníci (střídání dovnitř) také přidá.
+        """
         def _get_or_create(key: str, name: str, pid: str, team_side: str) -> dict:
             if key not in players:
                 team_won = (team_side == "1" and home_won) or (team_side == "2" and away_won)
@@ -327,10 +413,10 @@ class LivesportProvider(BaseFootballDataProvider):
                     "goals": 0,
                     "assists": 0,
                     "played": True,
-                    "minutes_played": match_duration,
+                    "minutes_played": 0,
                     "team_won": team_won,
                     "clean_sheet": clean_sheet,
-                    "_team_side": team_side,
+                    "_side": team_side,
                 }
             return players[key]
 
@@ -338,7 +424,6 @@ class LivesportProvider(BaseFootballDataProvider):
             if "III÷" not in block:
                 continue
 
-            # Parsuj celý blok jako klíč-hodnota
             kv: dict[str, list[str]] = {}
             for pair in block.split("¬"):
                 if "÷" not in pair:
@@ -349,7 +434,6 @@ class LivesportProvider(BaseFootballDataProvider):
             team_side = kv.get("IA", [""])[0]
             minute = _parse_minute(kv.get("IB", ["0"])[0])
 
-            # Každý blok může mít více IE/IF/IU/IM/IK záznamů (střelec + asistent)
             ie_list = kv.get("IE", [])
             if_list = kv.get("IF", [])
             iu_list = kv.get("IU", [])
@@ -357,14 +441,12 @@ class LivesportProvider(BaseFootballDataProvider):
             ik_list = kv.get("IK", [])
 
             for i, ik in enumerate(ik_list):
-                name = if_list[i] if i < len(if_list) else ""
-                url = iu_list[i] if i < len(iu_list) else ""
-                pid = im_list[i] if i < len(im_list) else ""
-                name = name.strip()
+                name = (if_list[i] if i < len(if_list) else "").strip()
+                url = (iu_list[i] if i < len(iu_list) else "").strip()
+                pid = (im_list[i] if i < len(im_list) else "").strip()
                 if not name:
                     continue
-
-                key = url.strip() or name
+                key = pid or url or name
 
                 if ik == _INCIDENT_GOAL:
                     p = _get_or_create(key, name, pid, team_side)
@@ -374,12 +456,8 @@ class LivesportProvider(BaseFootballDataProvider):
                     p = _get_or_create(key, name, pid, team_side)
                     p["assists"] += 1
 
-                elif ik == _INCIDENT_SUB_OUT:
-                    p = _get_or_create(key, name, pid, team_side)
-                    p["minutes_played"] = minute
-
                 elif ik == _INCIDENT_SUB_IN:
+                    # Střídající hráč — nastoupil, minuty = zbytek zápasu
                     p = _get_or_create(key, name, pid, team_side)
-                    p["minutes_played"] = match_duration - minute
+                    p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
 
-        return players
