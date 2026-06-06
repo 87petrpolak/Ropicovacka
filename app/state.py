@@ -34,5 +34,14 @@ def is_admin() -> bool:
 def require_active_game() -> int | None:
     gid = get_active_game_id()
     if gid is None:
+        # Automaticky vyber aktivní hru
+        from app.models.models import Game
+        db = get_db()
+        game = db.query(Game).filter(Game.is_active == True).order_by(Game.created_at.desc()).first()
+        if game is None:
+            game = db.query(Game).order_by(Game.created_at.desc()).first()
+        if game:
+            set_active_game_id(game.id)
+            return game.id
         st.warning("Není vybrána žádná aktivní hra. Přejdi na **Domů** a vytvoř nebo vyber hru.")
     return gid
