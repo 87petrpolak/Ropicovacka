@@ -47,7 +47,7 @@ with col1:
     sel_name = st.selectbox("Účastník", [p.name for p in participants])
     participant = next(p for p in participants if p.name == sel_name)
 with col2:
-    round_opts = {r.id: f"Kolo {r.round_number}: {r.name}" for r in rounds}
+    round_opts = {r.id: r.name for r in rounds}
     sel_round_id = st.selectbox(
         "Kolo", list(round_opts.keys()), format_func=lambda rid: round_opts[rid]
     )
