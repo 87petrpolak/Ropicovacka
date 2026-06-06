@@ -91,10 +91,8 @@ elif deadline:
 editable = not locked and not deadline_passed
 
 # ----------------------------------------------------------------
-# Výběr hráčů
+# Výběr hráčů — fragment = žádný DB dotaz při každém kliknutí
 # ----------------------------------------------------------------
-st.subheader(f"Vyber přesně {LINEUP_SIZE} hráčů z tvého {len(squad)}-hráčového kádru")
-
 POS_ORDER = ["GK", "DEF", "MID", "FWD"]
 POS_LABELS = {"GK": "Brankáři", "DEF": "Obránci", "MID": "Záložníci", "FWD": "Útočníci"}
 POS_INFO = {"GK": "přesně 1", "DEF": "3–5", "MID": "3–5", "FWD": "1–3"}
@@ -103,35 +101,42 @@ by_pos: dict[str, list] = {}
 for pl in squad:
     by_pos.setdefault(pl.position, []).append(pl)
 
-selected_ids: set[int] = set()
 
-for pos in POS_ORDER:
-    pos_players = by_pos.get(pos, [])
-    if not pos_players:
-        continue
-    st.caption(f"**{POS_LABELS[pos]}** — {POS_INFO.get(pos, '')}")
-    for pl in sorted(pos_players, key=lambda x: x.name):
-        checked = st.checkbox(
-            f"{pl.name} ({pl.club or pl.country})",
-            value=pl.id in current_ids,
-            key=f"ln_{nomination.id}_{pl.id}",
-            disabled=not editable,
-        )
-        if checked:
-            selected_ids.add(pl.id)
+@st.fragment
+def _lineup_form():
+    st.subheader(f"Vyber přesně {LINEUP_SIZE} hráčů z tvého {len(squad)}-hráčového kádru")
 
-count = len(selected_ids)
-color = "green" if count == LINEUP_SIZE else "red"
-st.markdown(f"**Vybráno: :{color}[{count} / {LINEUP_SIZE}]**")
+    selected_ids: set[int] = set()
 
-if editable:
-    if st.button("💾 Uložit nominaci", type="primary", use_container_width=True):
-        try:
-            submit_lineup(db, nomination, list(selected_ids), session_id)
-            st.success("Nominace byla úspěšně uložena!")
-            st.rerun()
-        except LineupError as e:
-            st.error(str(e))
+    for pos in POS_ORDER:
+        pos_players = by_pos.get(pos, [])
+        if not pos_players:
+            continue
+        st.caption(f"**{POS_LABELS[pos]}** — {POS_INFO.get(pos, '')}")
+        for pl in sorted(pos_players, key=lambda x: x.name):
+            checked = st.checkbox(
+                f"{pl.name} ({pl.club or pl.country})",
+                value=pl.id in current_ids,
+                key=f"ln_{nomination.id}_{pl.id}",
+                disabled=not editable,
+            )
+            if checked:
+                selected_ids.add(pl.id)
+
+    count = len(selected_ids)
+    color = "green" if count == LINEUP_SIZE else "red"
+    st.markdown(f"**Vybráno: :{color}[{count} / {LINEUP_SIZE}]**")
+
+    if editable:
+        if st.button("💾 Uložit nominaci", type="primary", use_container_width=True, disabled=count != LINEUP_SIZE):
+            try:
+                submit_lineup(db, nomination, list(selected_ids), session_id)
+                st.success("✅ Nominace uložena!")
+            except LineupError as e:
+                st.error(str(e))
+
+
+_lineup_form()
 
 # ----------------------------------------------------------------
 # Aktuálně uložená nominace
@@ -144,4 +149,4 @@ if current_lineup:
         by_pos_saved.setdefault(pl.position, []).append(pl)
     for pos in POS_ORDER:
         for pl in sorted(by_pos_saved.get(pos, []), key=lambda x: x.name):
-            st.write(f"**{POS_LABELS.get(pl.position, pl.position)}** {pl.name} ({pl.country})")
+            st.write(f"**{POS_LABELS.get(pl.position, pl.position)}** {pl.name} ({pl.club or pl.country})")
