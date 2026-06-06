@@ -60,7 +60,7 @@ class FootballPlayer(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     country: Mapped[str] = mapped_column(String(100), nullable=False)
-    position: Mapped[str] = mapped_column(SAEnum(Position), nullable=False)
+    position: Mapped[str] = mapped_column(SAEnum(Position, name="player_position"), nullable=False, name="pos")
     club: Mapped[Optional[str]] = mapped_column(String(200))
     external_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
