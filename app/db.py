@@ -1,22 +1,39 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
 import os
+from urllib.parse import quote_plus
+
+# Supabase Session Pooler (IPv4, eu-west-1)
+_POOLER_HOST = "aws-0-eu-west-1.pooler.supabase.com"
+_POOLER_PORT = 5432
+_POOLER_USER = "postgres.owtxlwmluyaspwagtzzo"
+_POOLER_DB   = "postgres"
 
 
 def _get_db_url() -> str:
     # 1. Streamlit secrets (produkce)
     try:
         import streamlit as st
+        # Heslo uložené zvlášť (bezpečnější, bez URL-encoding problémů)
+        password = st.secrets.get("DB_PASSWORD", "")
+        if password:
+            return (
+                f"postgresql://{_POOLER_USER}:{quote_plus(password)}"
+                f"@{_POOLER_HOST}:{_POOLER_PORT}/{_POOLER_DB}"
+            )
+        # Fallback: celé DATABASE_URL
         url = st.secrets.get("DATABASE_URL", "")
         if url:
-            # psycopg2 vyžaduje postgresql:// místo postgres://
             return url.replace("postgres://", "postgresql://", 1)
     except Exception:
         pass
+
     # 2. Env proměnná (lokální vývoj s Postgres)
     url = os.environ.get("DATABASE_URL", "")
     if url:
         return url.replace("postgres://", "postgresql://", 1)
+
     # 3. SQLite fallback (lokální vývoj)
     db_path = os.environ.get("ROPICOVACKA_DB", "ropicovacka.db")
     return f"sqlite:///{db_path}"
@@ -28,6 +45,7 @@ _is_sqlite = _DB_URL.startswith("sqlite")
 engine = create_engine(
     _DB_URL,
     connect_args={"check_same_thread": False} if _is_sqlite else {},
+    poolclass=NullPool if not _is_sqlite else None,
     pool_pre_ping=True,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
