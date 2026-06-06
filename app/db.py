@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from sqlalchemy.pool import NullPool
 import os
 from urllib.parse import quote_plus
 
@@ -42,12 +41,21 @@ def _get_db_url() -> str:
 _DB_URL = _get_db_url()
 _is_sqlite = _DB_URL.startswith("sqlite")
 
-engine = create_engine(
-    _DB_URL,
-    connect_args={"check_same_thread": False} if _is_sqlite else {},
-    poolclass=NullPool if not _is_sqlite else None,
-    pool_pre_ping=True,
-)
+if _is_sqlite:
+    engine = create_engine(
+        _DB_URL,
+        connect_args={"check_same_thread": False},
+        pool_pre_ping=True,
+    )
+else:
+    # Session Pooler (port 5432) podporuje persistent connections — rychlejší než NullPool
+    engine = create_engine(
+        _DB_URL,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=3,
+        pool_recycle=300,
+    )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
