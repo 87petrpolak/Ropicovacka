@@ -29,8 +29,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 pages = [
-    st.Page("app/pages/home.py",             title="Domů",              icon="🏠"),
     st.Page("app/pages/dashboard.py",        title="Dashboard",         icon="💰"),
+    st.Page("app/pages/home.py",             title="Domů",              icon="🏠"),
     st.Page("app/pages/participants.py",     title="Účastníci",         icon="👥"),
     st.Page("app/pages/players.py",          title="Hráči",             icon="⚽"),
     st.Page("app/pages/squad_import.py",     title="Import soupisek",   icon="📋"),
