@@ -206,6 +206,19 @@ class LineupSlot(Base):
     __table_args__ = (UniqueConstraint("nomination_id", "player_id"),)
 
 
+class LineupChangeLog(Base):
+    """Historie změn nominací."""
+    __tablename__ = "lineup_change_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nomination_id: Mapped[int] = mapped_column(Integer, ForeignKey("lineup_nominations.id"), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_players: Mapped[Optional[str]] = mapped_column(Text)    # jména přidaných hráčů
+    removed_players: Mapped[Optional[str]] = mapped_column(Text)  # jména odebraných hráčů
+
+    nomination: Mapped["LineupNomination"] = relationship("LineupNomination")
+
+
 class DataRefreshLog(Base):
     """Audit log for every data refresh run."""
     __tablename__ = "data_refresh_logs"

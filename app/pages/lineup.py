@@ -9,6 +9,7 @@ from app.services.lineup_manager import (
     get_lineup_players,
     LineupError,
 )
+from app.models.models import LineupChangeLog
 from app.services.squad_validator import LINEUP_SIZE
 
 st.title("Nominace sestavy")
@@ -137,6 +138,28 @@ def _lineup_form():
 
 
 _lineup_form()
+
+# ----------------------------------------------------------------
+# Historie změn nominace
+# ----------------------------------------------------------------
+change_logs = (
+    db.query(LineupChangeLog)
+    .filter(LineupChangeLog.nomination_id == nomination.id)
+    .order_by(LineupChangeLog.changed_at.desc())
+    .all()
+)
+if change_logs:
+    with st.expander(f"📋 Historie změn ({len(change_logs)})"):
+        for log in change_logs:
+            ts = log.changed_at.strftime("%d.%m. %H:%M")
+            parts = []
+            if log.added_players:
+                parts.append(f"✅ Přidáni: {log.added_players}")
+            if log.removed_players:
+                parts.append(f"❌ Odebráni: {log.removed_players}")
+            if not parts:
+                parts = ["Uložena nominace"]
+            st.caption(f"**{ts}** — {' | '.join(parts)}")
 
 # ----------------------------------------------------------------
 # Aktuálně uložená nominace

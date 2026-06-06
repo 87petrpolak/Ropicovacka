@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models.models import LineupNomination, LineupSlot, Round, Participant, FootballPlayer
+from app.models.models import LineupNomination, LineupSlot, LineupChangeLog, Round, Participant, FootballPlayer
 from app.services.squad_validator import validate_lineup
 from app.services.draft_engine import get_participant_squad
 
@@ -52,10 +52,27 @@ def submit_lineup(
     if not result.valid:
         raise LineupError("Neplatná nominace:\n" + "\n".join(result.errors))
 
+    # Zjisti předchozí sestavu pro log
+    old_ids = {s.player_id for s in db.query(LineupSlot).filter(LineupSlot.nomination_id == nomination.id).all()}
+    new_ids = set(player_ids)
+
     # Replace slots
     db.query(LineupSlot).filter(LineupSlot.nomination_id == nomination.id).delete()
     for pid in player_ids:
         db.add(LineupSlot(nomination_id=nomination.id, player_id=pid))
+
+    # Zapiš log změn
+    added_ids = new_ids - old_ids
+    removed_ids = old_ids - new_ids
+    if added_ids or removed_ids or not old_ids:
+        def _names(ids):
+            players = db.query(FootballPlayer).filter(FootballPlayer.id.in_(ids)).all()
+            return ", ".join(p.name for p in players) if players else None
+        db.add(LineupChangeLog(
+            nomination_id=nomination.id,
+            added_players=_names(added_ids) if added_ids else None,
+            removed_players=_names(removed_ids) if removed_ids else None,
+        ))
 
     nomination.submitted_at = datetime.utcnow()
     nomination.is_locked = False
