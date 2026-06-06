@@ -5,7 +5,30 @@ from app.state import get_db, require_active_game
 from app.models.models import Participant
 from app.services.cashflow import compute_events, compute_balances, cashflow_per_event, EVENT_LABELS
 
-st.title("Dashboard")
+col_title, col_btn = st.columns([4, 1])
+col_title.title("Dashboard")
+
+with col_btn:
+    st.markdown("<div style='margin-top:1.5rem'>", unsafe_allow_html=True)
+    if st.button("🔄 Aktualizovat", use_container_width=True, help="Načte nejnovější výsledky z Livesport.cz"):
+        from app.providers.livesport_provider import LivesportProvider
+        from app.services.data_refresh import run_refresh
+        game_id_tmp = require_active_game()
+        if game_id_tmp:
+            with st.spinner("Načítám…"):
+                try:
+                    provider = LivesportProvider()
+                    result = run_refresh(get_db(), provider, game_id_tmp, import_players=False, import_matches=True)
+                    if result.errors:
+                        st.error("\n".join(result.errors[:3]))
+                    else:
+                        parts = []
+                        if result.matches_added: parts.append(f"{result.matches_added} zápasů")
+                        if result.stats_added: parts.append(f"{result.stats_added} statistik")
+                        st.success("✅ " + (", ".join(parts) or "Nic nového"))
+                except Exception as e:
+                    st.error(str(e))
+    st.markdown("</div>", unsafe_allow_html=True)
 
 db = get_db()
 game_id = require_active_game()
