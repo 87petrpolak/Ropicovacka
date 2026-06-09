@@ -32,6 +32,8 @@ def submit_lineup(
     player_ids: list[int],
     session_id: int,
     admin_override: bool = False,
+    captain_id: int | None = None,
+    substitute_id: int | None = None,
 ) -> LineupNomination:
     if nomination.is_locked and not admin_override:
         raise LineupError("Nominace je zamknutá. Požádej administrátora o odemknutí.")
@@ -76,6 +78,8 @@ def submit_lineup(
 
     nomination.submitted_at = datetime.utcnow()
     nomination.is_locked = False
+    nomination.captain_player_id = captain_id
+    nomination.substitute_player_id = substitute_id
     db.commit()
     db.refresh(nomination)
     return nomination

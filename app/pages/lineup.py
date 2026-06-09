@@ -128,10 +128,63 @@ def _lineup_form():
     color = "green" if count == LINEUP_SIZE else "red"
     st.markdown(f"**Vybráno: :{color}[{count} / {LINEUP_SIZE}]**")
 
+    # Captain & substitute selectors (visible only when 11 players selected)
+    captain_id: int | None = None
+    substitute_id: int | None = None
+
+    if count == LINEUP_SIZE or not editable:
+        selected_players = [pl for pl in squad if pl.id in selected_ids]
+        selected_players_sorted = sorted(selected_players, key=lambda x: (POS_ORDER.index(x.position), x.name))
+
+        bench_players = [pl for pl in squad if pl.id not in selected_ids]
+        bench_players_sorted = sorted(bench_players, key=lambda x: (POS_ORDER.index(x.position), x.name))
+
+        st.divider()
+        col_c, col_s = st.columns(2)
+
+        with col_c:
+            captain_options = [None] + [pl.id for pl in selected_players_sorted]
+            captain_labels = ["— nevybráno —"] + [f"{pl.name} ({pl.position})" for pl in selected_players_sorted]
+            default_cap_idx = 0
+            if nomination.captain_player_id and nomination.captain_player_id in selected_ids:
+                try:
+                    default_cap_idx = captain_options.index(nomination.captain_player_id)
+                except ValueError:
+                    pass
+            cap_idx = st.selectbox(
+                "🅲 Kapitán (2× body)",
+                range(len(captain_options)),
+                index=default_cap_idx,
+                format_func=lambda i: captain_labels[i],
+                key=f"cap_{nomination.id}",
+                disabled=not editable,
+            )
+            captain_id = captain_options[cap_idx]
+
+        with col_s:
+            sub_options = [None] + [pl.id for pl in bench_players_sorted]
+            sub_labels = ["— nevybráno —"] + [f"{pl.name} ({pl.position})" for pl in bench_players_sorted]
+            default_sub_idx = 0
+            if nomination.substitute_player_id and nomination.substitute_player_id not in selected_ids:
+                try:
+                    default_sub_idx = sub_options.index(nomination.substitute_player_id)
+                except ValueError:
+                    pass
+            sub_idx = st.selectbox(
+                "🔄 Náhradník",
+                range(len(sub_options)),
+                index=default_sub_idx,
+                format_func=lambda i: sub_labels[i],
+                key=f"sub_{nomination.id}",
+                disabled=not editable,
+            )
+            substitute_id = sub_options[sub_idx]
+
     if editable:
         if st.button("💾 Uložit nominaci", type="primary", use_container_width=True, disabled=count != LINEUP_SIZE):
             try:
-                submit_lineup(db, nomination, list(selected_ids), session_id)
+                submit_lineup(db, nomination, list(selected_ids), session_id,
+                              captain_id=captain_id, substitute_id=substitute_id)
                 st.success("✅ Nominace uložena!")
             except LineupError as e:
                 st.error(str(e))
@@ -172,4 +225,12 @@ if current_lineup:
         by_pos_saved.setdefault(pl.position, []).append(pl)
     for pos in POS_ORDER:
         for pl in sorted(by_pos_saved.get(pos, []), key=lambda x: x.name):
-            st.write(f"**{POS_LABELS.get(pl.position, pl.position)}** {pl.name} ({pl.club or pl.country})")
+            suffix = ""
+            if pl.id == nomination.captain_player_id:
+                suffix = " 🅲 kapitán"
+            st.write(f"**{POS_LABELS.get(pl.position, pl.position)}** {pl.name} ({pl.club or pl.country}){suffix}")
+    if nomination.substitute_player_id:
+        from app.models.models import FootballPlayer as FP
+        sub = db.get(FP, nomination.substitute_player_id)
+        if sub:
+            st.write(f"**Náhradník** 🔄 {sub.name} ({sub.club or sub.country})")

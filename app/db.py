@@ -76,6 +76,8 @@ def init_db():
     Base.metadata.create_all(engine)
     if _is_sqlite:
         _migrate_sqlite(engine)
+    else:
+        migrate_postgres(engine)
 
 
 def _migrate_sqlite(eng):
@@ -85,3 +87,18 @@ def _migrate_sqlite(eng):
         if "minutes_played" not in existing:
             conn.execute(text("ALTER TABLE player_match_stats ADD COLUMN minutes_played INTEGER DEFAULT 0"))
             conn.commit()
+
+
+def migrate_postgres(eng):
+    """Additive migrations pro PostgreSQL (Supabase)."""
+    with eng.connect() as conn:
+        existing = {row[1] for row in conn.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='lineup_nominations'"
+        ))}
+        for col, ddl in [
+            ("captain_player_id",    "ALTER TABLE lineup_nominations ADD COLUMN captain_player_id INTEGER REFERENCES football_players(id)"),
+            ("substitute_player_id", "ALTER TABLE lineup_nominations ADD COLUMN substitute_player_id INTEGER REFERENCES football_players(id)"),
+        ]:
+            if col not in existing:
+                conn.execute(text(ddl))
+        conn.commit()

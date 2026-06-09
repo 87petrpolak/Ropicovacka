@@ -183,6 +183,8 @@ class LineupNomination(Base):
     submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     locked_by_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    captain_player_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("football_players.id"), nullable=True)
+    substitute_player_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("football_players.id"), nullable=True)
 
     participant: Mapped["Participant"] = relationship("Participant", back_populates="lineups")
     round: Mapped["Round"] = relationship("Round", back_populates="lineups")

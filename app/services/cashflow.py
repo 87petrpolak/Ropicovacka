@@ -72,8 +72,17 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
     # nominated_ids[round_id][participant_id] = set of player_ids
     rounds = db.query(Round).filter(Round.game_id == game_id).all()
     nominated: dict[int, dict[int, set[int]]] = {}
+    # captain_ids[round_id][participant_id] = player_id | None
+    captain_ids: dict[int, dict[int, int | None]] = {}
+    # substitute_ids[round_id][participant_id] = player_id | None
+    substitute_ids: dict[int, dict[int, int | None]] = {}
+    # played_ids[round_id] = set of player_ids kteří nastoupili (minutes_played > 0)
+    played_in_round: dict[int, set[int]] = {}
+
     for round_ in rounds:
         round_noms: dict[int, set[int]] = {}
+        round_captains: dict[int, int | None] = {}
+        round_subs: dict[int, int | None] = {}
         for p in participants:
             nom = db.query(LineupNomination).filter(
                 LineupNomination.participant_id == p.id,
@@ -82,8 +91,26 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
             if nom:
                 slots = db.query(LineupSlot).filter(LineupSlot.nomination_id == nom.id).all()
                 round_noms[p.id] = {s.player_id for s in slots}
+                round_captains[p.id] = nom.captain_player_id
+                round_subs[p.id] = nom.substitute_player_id
         if round_noms:
             nominated[round_.id] = round_noms
+            captain_ids[round_.id] = round_captains
+            substitute_ids[round_.id] = round_subs
+
+        # Zjisti kteří hráči nastoupili v zápasech tohoto kola
+        matches_in_round = db.query(Match).filter(
+            Match.game_id == game_id, Match.round_id == round_.id
+        ).all()
+        played = set()
+        for m in matches_in_round:
+            stats_list = db.query(PlayerMatchStats).filter(
+                PlayerMatchStats.match_id == m.id,
+                PlayerMatchStats.minutes_played > 0,
+            ).all()
+            played.update(s.player_id for s in stats_list)
+        if played:
+            played_in_round[round_.id] = played
 
     events = []
     all_stats = (
@@ -101,14 +128,41 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
             continue
 
         round_id = match.round_id
+        is_captain = False
+        is_substitute = False
 
-        # Pokud pro toto kolo existují nominace, hráč musí být nominován
         if round_id and round_id in nominated:
             owner_nominations = nominated[round_id].get(owner.id, set())
-            if player.id not in owner_nominations:
-                continue
+            owner_captain = captain_ids.get(round_id, {}).get(owner.id)
+            owner_sub = substitute_ids.get(round_id, {}).get(owner.id)
+            played = played_in_round.get(round_id, set())
+
+            if player.id == owner_sub:
+                # Náhradník — aktivuje se jen pokud někdo z 11 nenastoupil
+                # a náhradník má kompatibilní pozici (GK→GK, outfield→outfield)
+                non_playing = owner_nominations - played
+                if non_playing:
+                    sub_player = db.get(FootballPlayer, player.id)
+                    sub_is_gk = Position(sub_player.position) == Position.GK
+                    replaceable = any(
+                        (Position(db.get(FootballPlayer, pid).position) == Position.GK) == sub_is_gk
+                        for pid in non_playing
+                        if db.get(FootballPlayer, pid)
+                    )
+                    if not replaceable:
+                        continue
+                    is_substitute = True
+                else:
+                    continue  # Všichni nastoupili, náhradník se nepočítá
+
+            elif player.id in owner_nominations:
+                # Základní hráč — musí být nominován
+                is_captain = (player.id == owner_captain)
+            else:
+                continue  # Hráč není nominován ani náhradník
 
         bd = compute_points(stats, Position(player.position), scoring_rules)
+        captain_multiplier = 2 if is_captain else 1
 
         for event_type, value in [
             ("goals",       bd.goals_pts),
@@ -118,11 +172,13 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
         ]:
             if value > 0:
                 events.append({
-                    "player":      player,
-                    "owner":       owner,
-                    "match":       match,
-                    "event_type":  event_type,
-                    "event_value": value,
+                    "player":       player,
+                    "owner":        owner,
+                    "match":        match,
+                    "event_type":   event_type,
+                    "event_value":  value * captain_multiplier,
+                    "is_captain":   is_captain,
+                    "is_substitute": is_substitute,
                 })
 
     return events
