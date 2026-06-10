@@ -33,7 +33,7 @@ drafted_players = [p for p in all_players if p.id in drafted_ids]
 # Všechny týmy MS (z hráčů v DB)
 countries = sorted({p.country for p in all_players if p.country})
 
-locked = game.predictions_locked if game else False
+locked = getattr(game, "predictions_locked", False) if game else False
 if locked:
     st.warning("🔒 Tipy jsou uzamčeny — turnaj již začal.")
 

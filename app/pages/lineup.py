@@ -12,6 +12,7 @@ from app.services.lineup_manager import (
 from app.models.models import LineupChangeLog
 from app.services.squad_validator import LINEUP_SIZE
 from app.services.next_match_service import get_next_matches
+from app.utils.time_utils import fmt_prague
 
 st.title("Nominace sestavy")
 
@@ -78,7 +79,7 @@ if locked:
     st.error("🔒 Nominace je zamknutá. Kontaktuj administrátora pro odemknutí.")
 elif deadline_passed:
     st.warning(
-        f"⏰ Deadline uplynul ({deadline.strftime('%Y-%m-%d %H:%M')} UTC). "
+        f"⏰ Deadline uplynul ({fmt_prague(deadline, '%d.%m. %H:%M')}). "
         "Nominaci nelze změnit."
     )
 elif deadline:
@@ -86,7 +87,7 @@ elif deadline:
     hours = int(remaining.total_seconds() // 3600)
     minutes = int((remaining.total_seconds() % 3600) // 60)
     st.info(
-        f"📅 Deadline: {deadline.strftime('%Y-%m-%d %H:%M')} UTC — "
+        f"📅 Deadline: {fmt_prague(deadline, '%d.%m. %H:%M')} — "
         f"zbývá {hours}h {minutes}m"
     )
 
@@ -214,14 +215,28 @@ change_logs = (
     .all()
 )
 if change_logs:
+    def _reformat_log(names_str: str) -> str:
+        """Přeformátuje starý 'Jméno1, Jméno2' formát na nový 'Pozice: Jméno1 | Pozice: Jméno2'."""
+        if not names_str or " | " in names_str:
+            return names_str  # Už nový formát
+        pos_order = ["GK", "DEF", "MID", "FWD"]
+        pos_labels = {"GK": "Brankář", "DEF": "Obránci", "MID": "Záložníci", "FWD": "Útočníci"}
+        groups: dict[str, list[str]] = {p: [] for p in pos_order}
+        for name in [n.strip() for n in names_str.split(",")]:
+            player = db.query(FootballPlayer).filter(FootballPlayer.name == name).first()
+            pos = player.position if player and player.position in groups else "FWD"
+            groups[pos].append(name)
+        parts = [f"{pos_labels[p]}: {', '.join(sorted(groups[p]))}" for p in pos_order if groups[p]]
+        return " | ".join(parts)
+
     with st.expander(f"📋 Historie změn ({len(change_logs)})"):
         for log in change_logs:
-            ts = log.changed_at.strftime("%d.%m. %H:%M")
+            ts = fmt_prague(log.changed_at)
             parts = []
             if log.added_players:
-                parts.append(f"✅ Přidáni: {log.added_players}")
+                parts.append(f"✅ Přidáni: {_reformat_log(log.added_players)}")
             if log.removed_players:
-                parts.append(f"❌ Odebráni: {log.removed_players}")
+                parts.append(f"❌ Odebráni: {_reformat_log(log.removed_players)}")
             if not parts:
                 parts = ["Uložena nominace"]
             st.caption(f"**{ts}** — {' | '.join(parts)}")
