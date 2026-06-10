@@ -97,7 +97,7 @@ def _migrate_sqlite(eng):
 def migrate_postgres(eng):
     """Additive migrations pro PostgreSQL (Supabase)."""
     with eng.connect() as conn:
-        existing = {row[1] for row in conn.execute(text(
+        existing = {row[0] for row in conn.execute(text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='lineup_nominations'"
         ))}
         for col, ddl in [
