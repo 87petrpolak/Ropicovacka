@@ -8,7 +8,7 @@ from app.state import get_db, require_active_game
 from app.models.models import Participant, FootballPlayer, TournamentPrediction, Game, DraftSession, DraftPick
 
 st.title("🎯 Tipy na turnaj")
-st.caption("Každý správný tip = **+50 Kč** od každého ostatního. Vítěz MS a nejlepší střelec se počítají zvlášť — max. **+100 Kč** za obojí.")
+st.caption("Každý správný tip = **+50 Kč** od každého ostatního. Vítěz MS a nejlepší střelec se počítají zvlášť — při 3 hráčích max. **+200 Kč** za obojí (2× 100 Kč).")
 
 db = get_db()
 game_id = require_active_game()
