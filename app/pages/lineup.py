@@ -11,6 +11,7 @@ from app.services.lineup_manager import (
 )
 from app.models.models import LineupChangeLog
 from app.services.squad_validator import LINEUP_SIZE
+from app.services.next_match_service import get_next_matches
 
 st.title("Nominace sestavy")
 
@@ -107,6 +108,11 @@ for pl in squad:
 def _lineup_form():
     st.subheader(f"Vyber přesně {LINEUP_SIZE} hráčů z tvého {len(squad)}-hráčového kádru")
 
+    try:
+        next_matches = get_next_matches()
+    except Exception:
+        next_matches = {}
+
     selected_ids: set[int] = set()
 
     for pos in POS_ORDER:
@@ -115,8 +121,13 @@ def _lineup_form():
             continue
         st.caption(f"**{POS_LABELS[pos]}** — {POS_INFO.get(pos, '')}")
         for pl in sorted(pos_players, key=lambda x: x.name):
+            match_info = next_matches.get(pl.country, {})
+            if match_info:
+                next_label = f"  —  vs {match_info['opponent']}, {match_info['date_str']}"
+            else:
+                next_label = ""
             checked = st.checkbox(
-                f"{pl.name} ({pl.club or pl.country})",
+                f"{pl.name} ({pl.club or pl.country}){next_label}",
                 value=pl.id in current_ids,
                 key=f"ln_{nomination.id}_{pl.id}",
                 disabled=not editable,
