@@ -105,17 +105,10 @@ for pl in squad:
     by_pos.setdefault(pl.position, []).append(pl)
 
 # Načti příští zápasy na úrovni stránky (mimo fragment) — cachováno 30 min
-_next_error = None
 try:
     next_matches = get_next_matches()
-except Exception as e:
+except Exception:
     next_matches = {}
-    _next_error = str(e)
-
-if _next_error:
-    st.warning(f"⚠️ Příští zápasy se nenačetly: {_next_error}")
-elif not next_matches:
-    st.warning("⚠️ Příští zápasy: žádná data z Flashscore.")
 
 
 @st.fragment
@@ -130,7 +123,7 @@ def _lineup_form():
             continue
         st.caption(f"**{POS_LABELS[pos]}** — {POS_INFO.get(pos, '')}")
         for pl in sorted(pos_players, key=lambda x: x.name):
-            match_info = next_matches.get(pl.country, {})
+            match_info = next_matches.get(pl.club or pl.country, {})
             if match_info:
                 next_label = f"  —  vs {match_info['opponent']}, {match_info['date_str']}"
             else:
