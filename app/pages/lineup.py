@@ -103,15 +103,16 @@ by_pos: dict[str, list] = {}
 for pl in squad:
     by_pos.setdefault(pl.position, []).append(pl)
 
+# Načti příští zápasy na úrovni stránky (mimo fragment) — cachováno 30 min
+try:
+    next_matches = get_next_matches()
+except Exception:
+    next_matches = {}
+
 
 @st.fragment
 def _lineup_form():
     st.subheader(f"Vyber přesně {LINEUP_SIZE} hráčů z tvého {len(squad)}-hráčového kádru")
-
-    try:
-        next_matches = get_next_matches()
-    except Exception:
-        next_matches = {}
 
     selected_ids: set[int] = set()
 
