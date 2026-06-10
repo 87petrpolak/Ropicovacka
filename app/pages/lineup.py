@@ -105,10 +105,17 @@ for pl in squad:
     by_pos.setdefault(pl.position, []).append(pl)
 
 # Načti příští zápasy na úrovni stránky (mimo fragment) — cachováno 30 min
+_next_error = None
 try:
     next_matches = get_next_matches()
-except Exception:
+except Exception as e:
     next_matches = {}
+    _next_error = str(e)
+
+if _next_error:
+    st.warning(f"⚠️ Příští zápasy se nenačetly: {_next_error}")
+elif not next_matches:
+    st.warning("⚠️ Příští zápasy: žádná data z Flashscore.")
 
 
 @st.fragment
