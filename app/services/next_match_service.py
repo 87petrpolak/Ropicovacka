@@ -47,6 +47,64 @@ def _parse(raw: str) -> list[dict]:
 
 
 @_cache
+def get_all_ms_matches() -> list[dict]:
+    """
+    Vrátí všechny zápasy MS 2026 (nadcházející i odehrané) ze Flashscore.
+    Každý zápas: {match_id, home, away, played_at (UTC), date_str, time_str, status}
+    """
+    all_matches = []
+    seen_ids: set[str] = set()
+
+    for day_offset in range(0, 35):
+        try:
+            raw = _fetch(f"f_1_{day_offset}_2_cs_1")
+            records = _parse(raw)
+            in_wc = False
+
+            for rec in records:
+                if "ZEE" in rec:
+                    in_wc = rec.get("ZEE") == WC_TOURNAMENT_ID
+                    continue
+                if not in_wc or "AA" not in rec or "AE" not in rec:
+                    continue
+
+                match_id = rec["AA"]
+                if match_id in seen_ids:
+                    continue
+                seen_ids.add(match_id)
+
+                ts = rec.get("AD", "")
+                played_at = None
+                date_str = time_str = ""
+                if ts:
+                    try:
+                        dt_utc = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+                        dt_prague = dt_utc.astimezone(PRAGUE_TZ)
+                        played_at = dt_utc
+                        date_str = dt_prague.strftime("%-d.%-m.")
+                        time_str = dt_prague.strftime("%H:%M")
+                    except Exception:
+                        pass
+
+                all_matches.append({
+                    "match_id": match_id,
+                    "home": rec.get("AE", "").strip(),
+                    "away": rec.get("AF", "").strip(),
+                    "played_at": played_at,
+                    "date_str": date_str,
+                    "time_str": time_str,
+                    "status": rec.get("AB", "1"),
+                })
+
+            time.sleep(0.1)
+        except Exception:
+            continue
+
+    all_matches.sort(key=lambda x: x.get("played_at") or datetime.max.replace(tzinfo=timezone.utc))
+    return all_matches
+
+
+@_cache
 def get_next_matches() -> dict[str, dict]:
     """
     Vrátí slovník: česky název týmu → info o příštím zápasu.
