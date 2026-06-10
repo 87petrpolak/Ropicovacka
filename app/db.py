@@ -109,6 +109,17 @@ def migrate_postgres(eng):
             if col not in ln_cols:
                 conn.execute(text(ddl))
 
+        # lineup_change_logs: captain_name, substitute_name
+        cl_cols = {row[0] for row in conn.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='lineup_change_logs'"
+        ))}
+        for col, ddl in [
+            ("captain_name",    "ALTER TABLE lineup_change_logs ADD COLUMN captain_name TEXT"),
+            ("substitute_name", "ALTER TABLE lineup_change_logs ADD COLUMN substitute_name TEXT"),
+        ]:
+            if col not in cl_cols:
+                conn.execute(text(ddl))
+
         # games: actual_winner, actual_top_scorer_id, predictions_locked
         g_cols = {row[0] for row in conn.execute(text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='games'"

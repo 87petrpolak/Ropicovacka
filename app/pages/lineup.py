@@ -237,6 +237,10 @@ if change_logs:
                 parts.append(f"✅ Přidáni: {_reformat_log(log.added_players)}")
             if log.removed_players:
                 parts.append(f"❌ Odebráni: {_reformat_log(log.removed_players)}")
+            if getattr(log, "captain_name", None):
+                parts.append(f"🅲 Kapitán: {log.captain_name}")
+            if getattr(log, "substitute_name", None):
+                parts.append(f"🔄 Náhradník: {log.substitute_name}")
             if not parts:
                 parts = ["Uložena nominace"]
             st.caption(f"**{ts}** — {' | '.join(parts)}")

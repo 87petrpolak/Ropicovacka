@@ -82,10 +82,14 @@ def submit_lineup(
                 if groups[pos]:
                     parts.append(f"{pos_labels[pos]}: {', '.join(sorted(groups[pos]))}")
             return " | ".join(parts)
+        cap_player = db.get(FootballPlayer, captain_id) if captain_id else None
+        sub_player = db.get(FootballPlayer, substitute_id) if substitute_id else None
         db.add(LineupChangeLog(
             nomination_id=nomination.id,
             added_players=_names(added_ids) if added_ids else None,
             removed_players=_names(removed_ids) if removed_ids else None,
+            captain_name=cap_player.name if cap_player else None,
+            substitute_name=sub_player.name if sub_player else None,
         ))
 
     nomination.submitted_at = datetime.utcnow()

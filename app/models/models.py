@@ -221,6 +221,8 @@ class LineupChangeLog(Base):
     changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     added_players: Mapped[Optional[str]] = mapped_column(Text)    # jména přidaných hráčů
     removed_players: Mapped[Optional[str]] = mapped_column(Text)  # jména odebraných hráčů
+    captain_name: Mapped[Optional[str]] = mapped_column(Text)     # jméno kapitána při uložení
+    substitute_name: Mapped[Optional[str]] = mapped_column(Text)  # jméno náhradníka při uložení
 
     nomination: Mapped["LineupNomination"] = relationship("LineupNomination")
 
