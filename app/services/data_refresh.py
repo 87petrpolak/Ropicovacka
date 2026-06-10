@@ -1,6 +1,7 @@
 """Ingests data from a provider into the DB. Idempotent."""
 from __future__ import annotations
 from datetime import datetime
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from app.providers.base import BaseFootballDataProvider, RefreshResult
 from app.models.models import (
@@ -114,7 +115,42 @@ def _upsert_match(db: Session, md, game_id: int, result: RefreshResult):
             match.round_id = round_.id
         result.matches_updated += 1
 
+    # Auto-přiřaď kolo podle pořadí zápasů týmu (1. zápas → Kolo 1 atd.)
+    if not match.round_id:
+        _assign_round_by_team_order(db, game_id, match)
+
     return match
+
+
+def _assign_round_by_team_order(db: Session, game_id: int, match: Match) -> None:
+    """
+    Přiřadí zápas ke kolu podle toho, kolikátý zápas tým hraje.
+    1. zápas týmu → Kolo 1, 2. zápas → Kolo 2, atd.
+    Kolo musí v DB existovat (vytvoříš ho v Administraci).
+    """
+    if not match.home_team or not match.played_at:
+        return
+
+    # Kolik předchozích zápasů home_team odehrál (před tímto zápasem)?
+    prev_count = db.query(Match).filter(
+        Match.game_id == game_id,
+        Match.id != match.id,
+        or_(
+            Match.home_team == match.home_team,
+            Match.away_team == match.home_team,
+        ),
+        Match.played_at < match.played_at,
+    ).count()
+
+    round_number = prev_count + 1
+
+    round_ = db.query(Round).filter(
+        Round.game_id == game_id,
+        Round.round_number == round_number,
+    ).first()
+
+    if round_:
+        match.round_id = round_.id
 
 
 def _upsert_stats(db: Session, sd, match: Match, result: RefreshResult):
