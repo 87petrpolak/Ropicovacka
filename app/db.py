@@ -96,10 +96,6 @@ def _migrate_sqlite(eng):
 
 def migrate_postgres(eng):
     """Additive migrations pro PostgreSQL (Supabase)."""
-    from app.models import models  # noqa – zajistí registraci modelů
-    from app.db import Base
-    # Vytvoří nové tabulky (tournament_predictions) pokud neexistují
-    Base.metadata.create_all(eng)
 
     with eng.connect() as conn:
         # lineup_nominations: captain + substitute
