@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import datetime
 from app.state import get_db, require_active_game
-from app.models.models import Participant, Round, DraftSession
+from app.models.models import Participant, Round, DraftSession, FootballPlayer
 from app.services.draft_engine import get_participant_squad
 from app.services.lineup_manager import (
     get_or_create_nomination,
