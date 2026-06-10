@@ -3,6 +3,7 @@ Kalendář zápasů — zobrazuje jen zápasy kde máme nominované hráče.
 """
 import streamlit as st
 from collections import defaultdict
+from datetime import timezone, timedelta
 from app.state import get_db, require_active_game
 from app.models.models import (
     Participant, Round, LineupNomination, LineupSlot, FootballPlayer, DraftSession
@@ -67,6 +68,7 @@ for i, participant in enumerate(participants):
 
     slots = db.query(LineupSlot).filter(LineupSlot.nomination_id == nom.id).all()
     captain_id = nom.captain_player_id
+    substitute_id = nom.substitute_player_id
 
     for slot in slots:
         player = db.get(FootballPlayer, slot.player_id)
@@ -80,8 +82,23 @@ for i, participant in enumerate(participants):
             "player": player,
             "icon": PARTICIPANT_COLORS[i % len(PARTICIPANT_COLORS)],
             "is_captain": (player.id == captain_id),
+            "is_substitute": False,
         }
         team_to_players[team].append(entry)
+
+    # Přidej náhradníka
+    if substitute_id:
+        sub = db.get(FootballPlayer, substitute_id)
+        if sub:
+            team = sub.club or sub.country
+            if team:
+                team_to_players[team].append({
+                    "participant": participant,
+                    "player": sub,
+                    "icon": PARTICIPANT_COLORS[i % len(PARTICIPANT_COLORS)],
+                    "is_captain": False,
+                    "is_substitute": True,
+                })
 
 if not team_to_players:
     st.warning("Pro toto kolo zatím nikdo nenominoval sestavu.")
@@ -133,8 +150,19 @@ by_date: dict[str, list] = defaultdict(list)
 for m in relevant:
     by_date[m["date_str"] or "?"].append(m)
 
+CZ_DAYS = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
+PRAGUE_TZ = timezone(timedelta(hours=2))
+
+def date_heading(m: dict) -> str:
+    if m.get("played_at"):
+        dt = m["played_at"].astimezone(PRAGUE_TZ)
+        day = CZ_DAYS[dt.weekday()]
+        return f"{m['date_str']} ({day})"
+    return m["date_str"] or "?"
+
 for date_label, matches in by_date.items():
-    st.markdown(f"### 📆 {date_label}")
+    heading = date_heading(matches[0])
+    st.markdown(f"### 📆 {heading}")
 
     for m in matches:
         home, away = m["home"], m["away"]
@@ -163,10 +191,12 @@ for date_label, matches in by_date.items():
         for p_name, entries in by_participant.items():
             icon = entries[0]["icon"]
             player_names = []
-            for e in sorted(entries, key=lambda x: x["player"].name):
+            for e in sorted(entries, key=lambda x: (x["is_substitute"], x["player"].name)):
                 name = e["player"].name
                 if e["is_captain"]:
                     name += " 🅲"
+                if e["is_substitute"]:
+                    name = f"🔄 {name}"
                 player_names.append(name)
             st.caption(f"{icon} **{p_name}:** {', '.join(player_names)}")
 
