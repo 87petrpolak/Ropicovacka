@@ -31,7 +31,7 @@ all_players = db.query(FootballPlayer).order_by(FootballPlayer.name).all()
 drafted_players = [p for p in all_players if p.id in drafted_ids]
 
 # Všechny týmy MS (z hráčů v DB)
-countries = sorted({p.country for p in all_players if p.country})
+countries = sorted({p.club or p.country for p in all_players if p.club or p.country})
 
 locked = getattr(game, "predictions_locked", False) if game else False
 if locked:
