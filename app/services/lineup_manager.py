@@ -69,7 +69,19 @@ def submit_lineup(
     if added_ids or removed_ids or not old_ids:
         def _names(ids):
             players = db.query(FootballPlayer).filter(FootballPlayer.id.in_(ids)).all()
-            return ", ".join(p.name for p in players) if players else None
+            if not players:
+                return None
+            pos_order = ["GK", "DEF", "MID", "FWD"]
+            pos_labels = {"GK": "Brankář", "DEF": "Obránci", "MID": "Záložníci", "FWD": "Útočníci"}
+            groups: dict[str, list[str]] = {p: [] for p in pos_order}
+            for pl in players:
+                pos = pl.position if pl.position in groups else "FWD"
+                groups[pos].append(pl.name)
+            parts = []
+            for pos in pos_order:
+                if groups[pos]:
+                    parts.append(f"{pos_labels[pos]}: {', '.join(sorted(groups[pos]))}")
+            return " | ".join(parts)
         db.add(LineupChangeLog(
             nomination_id=nomination.id,
             added_players=_names(added_ids) if added_ids else None,
