@@ -83,9 +83,14 @@ def init_db():
 def _migrate_sqlite(eng):
     """Additive migrations pro SQLite (lokální vývoj)."""
     with eng.connect() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(player_match_stats)"))}
-        if "minutes_played" not in existing:
+        stats_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(player_match_stats)"))}
+        if "minutes_played" not in stats_cols:
             conn.execute(text("ALTER TABLE player_match_stats ADD COLUMN minutes_played INTEGER DEFAULT 0"))
+            conn.commit()
+
+        players_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(football_players)"))}
+        if "position" in players_cols and "pos" not in players_cols:
+            conn.execute(text("ALTER TABLE football_players RENAME COLUMN position TO pos"))
             conn.commit()
 
 
