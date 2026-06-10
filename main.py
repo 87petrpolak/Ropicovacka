@@ -37,6 +37,7 @@ pages = [
     st.Page("app/pages/draft_room.py",       title="Draft",             icon="🎯"),
     st.Page("app/pages/squads.py",           title="Sestavy",           icon="🗂️"),
     st.Page("app/pages/lineup.py",           title="Nominace",          icon="📋"),
+    st.Page("app/pages/predictions.py",      title="Tipy na turnaj",    icon="🎯"),
     st.Page("app/pages/match_import.py",     title="Import statistik",  icon="📥"),
     st.Page("app/pages/data_refresh.py",     title="Aktualizace dat",   icon="🔄"),
     st.Page("app/pages/leaderboard.py",      title="Pořadí",            icon="🏆"),

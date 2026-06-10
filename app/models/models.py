@@ -28,6 +28,10 @@ class Game(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     season: Mapped[str] = mapped_column(String(50), default="2026")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Skutečné výsledky turnaje (vyplní admin po skončení)
+    actual_winner: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    actual_top_scorer_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("football_players.id"), nullable=True)
+    predictions_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     participants: Mapped[list["Participant"]] = relationship("Participant", back_populates="game")
@@ -219,6 +223,22 @@ class LineupChangeLog(Base):
     removed_players: Mapped[Optional[str]] = mapped_column(Text)  # jména odebraných hráčů
 
     nomination: Mapped["LineupNomination"] = relationship("LineupNomination")
+
+
+class TournamentPrediction(Base):
+    """Tip účastníka na vítěze turnaje a nejlepšího střelce."""
+    __tablename__ = "tournament_predictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(Integer, ForeignKey("games.id"), nullable=False)
+    participant_id: Mapped[int] = mapped_column(Integer, ForeignKey("participants.id"), nullable=False)
+    winner_country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    top_scorer_player_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("football_players.id"), nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    participant: Mapped["Participant"] = relationship("Participant")
+
+    __table_args__ = (UniqueConstraint("game_id", "participant_id"),)
 
 
 class DataRefreshLog(Base):

@@ -96,14 +96,33 @@ def _migrate_sqlite(eng):
 
 def migrate_postgres(eng):
     """Additive migrations pro PostgreSQL (Supabase)."""
+    from app.models import models  # noqa – zajistí registraci modelů
+    from app.db import Base
+    # Vytvoří nové tabulky (tournament_predictions) pokud neexistují
+    Base.metadata.create_all(eng)
+
     with eng.connect() as conn:
-        existing = {row[0] for row in conn.execute(text(
+        # lineup_nominations: captain + substitute
+        ln_cols = {row[0] for row in conn.execute(text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='lineup_nominations'"
         ))}
         for col, ddl in [
             ("captain_player_id",    "ALTER TABLE lineup_nominations ADD COLUMN captain_player_id INTEGER REFERENCES football_players(id)"),
             ("substitute_player_id", "ALTER TABLE lineup_nominations ADD COLUMN substitute_player_id INTEGER REFERENCES football_players(id)"),
         ]:
-            if col not in existing:
+            if col not in ln_cols:
                 conn.execute(text(ddl))
+
+        # games: actual_winner, actual_top_scorer_id, predictions_locked
+        g_cols = {row[0] for row in conn.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='games'"
+        ))}
+        for col, ddl in [
+            ("actual_winner",        "ALTER TABLE games ADD COLUMN actual_winner VARCHAR(100)"),
+            ("actual_top_scorer_id", "ALTER TABLE games ADD COLUMN actual_top_scorer_id INTEGER REFERENCES football_players(id)"),
+            ("predictions_locked",   "ALTER TABLE games ADD COLUMN predictions_locked BOOLEAN DEFAULT FALSE"),
+        ]:
+            if col not in g_cols:
+                conn.execute(text(ddl))
+
         conn.commit()

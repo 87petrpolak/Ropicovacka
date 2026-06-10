@@ -16,8 +16,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.models import (
-    DraftPick, DraftSession, FootballPlayer, LineupNomination, LineupSlot, Match,
-    Participant, PlayerMatchStats, PointsRule, Position, Round
+    DraftPick, DraftSession, FootballPlayer, Game, LineupNomination, LineupSlot, Match,
+    Participant, PlayerMatchStats, PointsRule, Position, Round, TournamentPrediction
 )
 from app.services.scoring import compute_points, rules_from_db
 
@@ -201,6 +201,46 @@ def compute_balances(events: list[dict], participants: list[Participant]) -> dic
         for p in participants:
             if p.id != owner_id:
                 balances[p.id] -= val
+
+    return balances
+
+
+def compute_prediction_balances(db: Session, game_id: int, participants: list[Participant]) -> dict[int, float]:
+    """
+    Spočítá Kč zůstatek z tipů na turnaj.
+
+    Pravidlo: každý správný tipér dostane 50 Kč od každého špatného tipéra.
+    Příklad (3 účastníci, 2 tipli správně, 1 špatně):
+      Správní: +50 Kč každý (od špatného)
+      Špatný:  -100 Kč (50 × 2 správným)
+      Součet: 50 + 50 - 100 = 0 ✓
+    """
+    BONUS = 50.0
+    balances: dict[int, float] = {p.id: 0.0 for p in participants}
+
+    game = db.get(Game, game_id)
+    if not game or (not game.actual_winner and not game.actual_top_scorer_id):
+        return balances  # Výsledky ještě nejsou zadány
+
+    preds = db.query(TournamentPrediction).filter(TournamentPrediction.game_id == game_id).all()
+    pred_map = {p.participant_id: p for p in preds}
+
+    for category, is_correct_fn in [
+        ("winner",     lambda pr: pr.winner_country == game.actual_winner),
+        ("top_scorer", lambda pr: pr.top_scorer_player_id == game.actual_top_scorer_id),
+    ]:
+        # Rozhodni kdo tipnul správně a kdo ne
+        correct = [p for p in participants if (pr := pred_map.get(p.id)) and is_correct_fn(pr)]
+        wrong   = [p for p in participants if p not in correct]
+
+        if not correct or not wrong:
+            continue  # Buď všichni správně, nebo nikdo — nulový pohyb
+
+        # Každý správný dostane BONUS od každého špatného
+        for c in correct:
+            balances[c.id] += BONUS * len(wrong)
+        for w in wrong:
+            balances[w.id] -= BONUS * len(correct)
 
     return balances
 

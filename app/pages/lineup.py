@@ -155,7 +155,7 @@ def _lineup_form():
 
         with col_c:
             captain_options = [None] + [pl.id for pl in selected_players_sorted]
-            captain_labels = ["— nevybráno —"] + [f"{pl.name} ({pl.position})" for pl in selected_players_sorted]
+            captain_labels = ["— nevybráno —"] + [f"{pl.name} ({str(pl.position).split('.')[-1]})" for pl in selected_players_sorted]
             default_cap_idx = 0
             if nomination.captain_player_id and nomination.captain_player_id in selected_ids:
                 try:
@@ -174,7 +174,7 @@ def _lineup_form():
 
         with col_s:
             sub_options = [None] + [pl.id for pl in bench_players_sorted]
-            sub_labels = ["— nevybráno —"] + [f"{pl.name} ({pl.position})" for pl in bench_players_sorted]
+            sub_labels = ["— nevybráno —"] + [f"{pl.name} ({str(pl.position).split('.')[-1]})" for pl in bench_players_sorted]
             default_sub_idx = 0
             if nomination.substitute_player_id and nomination.substitute_player_id not in selected_ids:
                 try:
