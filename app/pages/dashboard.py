@@ -19,6 +19,8 @@ with col_btn:
                 try:
                     provider = LivesportProvider()
                     result = run_refresh(get_db(), provider, game_id_tmp, import_players=False, import_matches=True)
+                    from app.services.next_match_service import invalidate_match_cache
+                    invalidate_match_cache()
                     if result.errors:
                         st.error("\n".join(result.errors[:3]))
                     else:

@@ -243,6 +243,15 @@ class TournamentPrediction(Base):
     __table_args__ = (UniqueConstraint("game_id", "participant_id"),)
 
 
+class AppCache(Base):
+    """Jednoduchá key/value cache pro sdílení dat mezi uživateli (např. MS zápasy)."""
+    __tablename__ = "app_cache"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class DataRefreshLog(Base):
     """Audit log for every data refresh run."""
     __tablename__ = "data_refresh_logs"

@@ -132,4 +132,13 @@ def migrate_postgres(eng):
             if col not in g_cols:
                 conn.execute(text(ddl))
 
+        # app_cache — vytvoří se přes create_all, ale pro jistotu
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_cache (
+                key VARCHAR(100) PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """))
+
         conn.commit()
