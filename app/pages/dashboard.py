@@ -137,14 +137,26 @@ if my_events:
     st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
 # Nominovaní hráči bez bodů (odehráli zápas, ale nic nevydělali)
-nom_ids_q = db.query(LineupNomination.id).filter(
+noms = db.query(LineupNomination).filter(
     LineupNomination.participant_id == sel_p.id
-)
+).all()
+nom_ids_q = [n.id for n in noms]
+
+# Základní sestava (11 hráčů)
 nominated_pids = {
     s.player_id for s in db.query(LineupSlot).filter(
         LineupSlot.nomination_id.in_(nom_ids_q)
     ).all()
 }
+# Náhradník — přidej jen pokud skutečně nastoupil (played=True)
+sub_pids = {n.substitute_player_id for n in noms if n.substitute_player_id}
+for spid in sub_pids:
+    stats = db.query(PlayerMatchStats).filter(
+        PlayerMatchStats.player_id == spid,
+        PlayerMatchStats.played == True,
+    ).first()
+    if stats:
+        nominated_pids.add(spid)
 event_pids = {ev["player"].id for ev in my_events}
 zero_rows = []
 for pid in nominated_pids - event_pids:
