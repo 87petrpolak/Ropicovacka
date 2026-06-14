@@ -57,7 +57,7 @@ _POS_MAP = {
 }
 
 # Typy incidentů
-_INCIDENT_GOAL = "Gól"
+_INCIDENT_GOALS = {"Gól", "Penalta"}   # obojí = gól pro střelce
 _INCIDENT_OWN_GOAL = "Vlastní gól"
 _INCIDENT_SUB_IN = "Střídání"
 _INCIDENT_SUB_OUT = "Střídání - Out"
@@ -468,7 +468,7 @@ class LivesportProvider(BaseFootballDataProvider):
                     continue
                 key = pid or url or name
 
-                if ik == _INCIDENT_GOAL:
+                if ik in _INCIDENT_GOALS:
                     p = _get_or_create(key, name, pid, team_side)
                     p["goals"] += 1
                     goals_timeline.append((minute, team_side))
