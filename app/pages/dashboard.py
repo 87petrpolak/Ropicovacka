@@ -23,12 +23,8 @@ with col_btn:
                     invalidate_match_cache()
                     if result.errors:
                         st.error("\n".join(result.errors[:5]))
-                    parts = []
-                    if result.matches_added: parts.append(f"+{result.matches_added} zápasů")
-                    if result.matches_updated: parts.append(f"~{result.matches_updated} zápasů aktualizováno")
-                    if result.stats_added: parts.append(f"+{result.stats_added} statistik")
-                    if result.stats_updated: parts.append(f"~{result.stats_updated} statistik aktualizováno")
-                    st.success("✅ " + (", ".join(parts) or "Nic nového"))
+                    total = result.matches_added + result.matches_updated
+                    st.success(f"✅ {total} zápasů" if total else "✅ Nic nového")
                 except Exception as e:
                     st.error(str(e))
     st.markdown("</div>", unsafe_allow_html=True)
