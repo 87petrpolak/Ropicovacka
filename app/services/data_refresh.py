@@ -116,12 +116,18 @@ def _upsert_match(db: Session, md, game_id: int, result: RefreshResult):
         db.flush()
         result.matches_added += 1
     else:
+        changed = (
+            match.home_score != md.home_score or
+            match.away_score != md.away_score or
+            match.is_finished != md.is_finished
+        )
         match.home_score = md.home_score
         match.away_score = md.away_score
         match.is_finished = md.is_finished
         if round_:
             match.round_id = round_.id
-        result.matches_updated += 1
+        if changed:
+            result.matches_updated += 1
 
     # Auto-přiřaď kolo podle pořadí zápasů týmu (1. zápas → Kolo 1 atd.)
     if not match.round_id:
