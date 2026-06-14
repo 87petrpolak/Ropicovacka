@@ -141,6 +141,18 @@ def migrate_postgres(eng):
             )
         """))
 
+        # Jednorázový reimport stats po opravě parsování penalty gólů
+        stats_reimport = conn.execute(text(
+            "SELECT value FROM app_cache WHERE key = 'stats_reimport_v2'"
+        )).fetchone()
+        if stats_reimport is None:
+            conn.execute(text("DELETE FROM player_match_stats"))
+            conn.execute(text(
+                "INSERT INTO app_cache (key, value, updated_at) VALUES "
+                "('stats_reimport_v2', 'done', NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()"
+            ))
+
         # Oprav hodnoty bodovacích pravidel na správné hodnoty
         conn.execute(text("""
             UPDATE points_rules SET points = CASE name
