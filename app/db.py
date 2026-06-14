@@ -141,4 +141,47 @@ def migrate_postgres(eng):
             )
         """))
 
+        # Oprav hodnoty bodovacích pravidel na správné hodnoty
+        conn.execute(text("""
+            UPDATE points_rules SET points = CASE name
+                WHEN 'goal'                   THEN 30
+                WHEN 'assist'                 THEN 25
+                WHEN 'mid_team_win'           THEN 15
+                WHEN 'def_team_win'           THEN 15
+                WHEN 'goalkeeper_clean_sheet' THEN 30
+                WHEN 'defender_clean_sheet'   THEN 15
+                ELSE points
+            END
+            WHERE name IN ('goal','assist','mid_team_win','def_team_win',
+                           'goalkeeper_clean_sheet','defender_clean_sheet')
+        """))
+
         conn.commit()
+
+    # Přepočítej computed_points pro všechny existující statistiky se správnými pravidly
+    _recompute_all_points(eng)
+
+
+def _recompute_all_points(eng):
+    """Přepočítá computed_points pro všechny PlayerMatchStats podle aktuálních pravidel."""
+    try:
+        from app.models.models import PlayerMatchStats, FootballPlayer, PointsRule, Game, Position
+        from app.services.scoring import compute_points, rules_from_db
+        db = SessionLocal()
+        try:
+            game = db.query(Game).filter(Game.is_active == True).first()
+            if not game:
+                return
+            db_rules = db.query(PointsRule).filter(PointsRule.game_id == game.id).all()
+            scoring_rules = rules_from_db(db_rules)
+            stats_list = db.query(PlayerMatchStats).all()
+            for stats in stats_list:
+                player = db.get(FootballPlayer, stats.player_id)
+                if player:
+                    bd = compute_points(stats, Position(player.position), scoring_rules)
+                    stats.computed_points = bd.total
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
