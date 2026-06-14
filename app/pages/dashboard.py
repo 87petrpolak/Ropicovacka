@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 from app.state import get_db, require_active_game
-from app.models.models import Participant
+from app.models.models import Participant, LineupNomination, LineupSlot, FootballPlayer, PlayerMatchStats, Match
 from app.services.cashflow import compute_events, compute_balances, cashflow_per_event, EVENT_LABELS
 
 col_title, col_btn = st.columns([4, 1])
@@ -116,10 +116,9 @@ sel_p = next(p for p in participants if p.name == sel_name)
 
 my_events = [ev for ev in events if ev["owner"].id == sel_p.id]
 
-if not my_events:
-    st.info("Tento účastník zatím nemá žádné body.")
-else:
-    others_count = len(participants) - 1
+others_count = len(participants) - 1
+
+if my_events:
     sorted_my = sorted(my_events, key=lambda e: (e["match"].played_at or "", -e["event_value"]), reverse=True)
     detail_rows = []
     for ev in sorted_my:
@@ -136,4 +135,44 @@ else:
             "Získáno": f"+{ev['event_value'] * others_count:.0f} Kč",
         })
     st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+
+# Nominovaní hráči bez bodů (odehráli zápas, ale nic nevydělali)
+nom_ids_q = db.query(LineupNomination.id).filter(
+    LineupNomination.participant_id == sel_p.id
+)
+nominated_pids = {
+    s.player_id for s in db.query(LineupSlot).filter(
+        LineupSlot.nomination_id.in_(nom_ids_q)
+    ).all()
+}
+event_pids = {ev["player"].id for ev in my_events}
+zero_rows = []
+for pid in nominated_pids - event_pids:
+    played_stats = db.query(PlayerMatchStats).filter(
+        PlayerMatchStats.player_id == pid,
+        PlayerMatchStats.played == True,
+    ).all()
+    for s in played_stats:
+        match = db.get(Match, s.match_id)
+        player = db.get(FootballPlayer, pid)
+        if match and player:
+            match_label = (
+                f"{match.home_team} {match.home_score}–{match.away_score} {match.away_team}"
+                if match.home_team else match.external_id
+            )
+            zero_rows.append({
+                "Zápas": match_label,
+                "Hráč": player.name,
+                "Post": player.position,
+                "Event": "—",
+                "Získáno": "0 Kč",
+            })
+
+if zero_rows:
+    if my_events:
+        st.caption("Hráči bez bodů v odehraných zápasech:")
+    st.dataframe(pd.DataFrame(zero_rows), use_container_width=True, hide_index=True)
+
+if not my_events and not zero_rows:
+    st.info("Tento účastník zatím nemá žádné body.")
     st.metric("Celkový zůstatek", f"{balances[sel_p.id]:+.0f} Kč")
