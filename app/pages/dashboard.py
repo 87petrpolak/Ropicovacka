@@ -10,7 +10,6 @@ col_title.title("Dashboard")
 
 with col_btn:
     st.markdown("<div style='margin-top:1.5rem'>", unsafe_allow_html=True)
-    force = st.checkbox("↺ Přeimportovat vše", help="Smaže a znovu stáhne statistiky všech zápasů (použij při opravě chyby)")
     if st.button("🔄 Aktualizovat", use_container_width=True, help="Načte nejnovější výsledky z Livesport.cz"):
         from app.providers.livesport_provider import LivesportProvider
         from app.services.data_refresh import run_refresh
@@ -18,11 +17,6 @@ with col_btn:
         if game_id_tmp:
             with st.spinner("Načítám…"):
                 try:
-                    if force:
-                        from app.models.models import PlayerMatchStats as PMS
-                        db_tmp = get_db()
-                        db_tmp.query(PMS).delete()
-                        db_tmp.commit()
                     provider = LivesportProvider()
                     result = run_refresh(get_db(), provider, game_id_tmp, import_players=False, import_matches=True)
                     from app.services.next_match_service import invalidate_match_cache
