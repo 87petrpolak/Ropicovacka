@@ -164,22 +164,33 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
         bd = compute_points(stats, Position(player.position), scoring_rules)
         captain_multiplier = 2 if is_captain else 1
 
-        for event_type, value in [
-            ("goals",       bd.goals_pts),
-            ("assists",     bd.assists_pts),
-            ("team_win",    bd.team_win_pts),
-            ("clean_sheet", bd.clean_sheet_pts),
-        ]:
-            if value > 0:
-                events.append({
-                    "player":       player,
-                    "owner":        owner,
-                    "match":        match,
-                    "event_type":   event_type,
-                    "event_value":  value * captain_multiplier,
-                    "is_captain":   is_captain,
-                    "is_substitute": is_substitute,
-                })
+        def _add(event_type: str, value: float) -> None:
+            events.append({
+                "player":        player,
+                "owner":         owner,
+                "match":         match,
+                "event_type":    event_type,
+                "event_value":   value * captain_multiplier,
+                "is_captain":    is_captain,
+                "is_substitute": is_substitute,
+            })
+
+        # Góly a asistence — jeden řádek na každý gól/asistenci
+        if bd.goals_pts > 0 and stats.goals > 0:
+            per_goal = bd.goals_pts / stats.goals
+            for _ in range(stats.goals):
+                _add("goals", per_goal)
+
+        if bd.assists_pts > 0 and stats.assists > 0:
+            per_assist = bd.assists_pts / stats.assists
+            for _ in range(stats.assists):
+                _add("assists", per_assist)
+
+        # Výhra a čisté konto — vždy jeden řádek
+        if bd.team_win_pts > 0:
+            _add("team_win", bd.team_win_pts)
+        if bd.clean_sheet_pts > 0:
+            _add("clean_sheet", bd.clean_sheet_pts)
 
     return events
 
