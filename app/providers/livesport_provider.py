@@ -372,16 +372,17 @@ class LivesportProvider(BaseFootballDataProvider):
 
             team_won = (current_side == "1" and home_won) or (current_side == "2" and away_won)
 
-            # Minuty: pokud má LIT (střídán ven), přečti minutu
+            # Minuty: pokud má LIT čistou minutu střídání (např. "73'" nebo "45+2'"),
+            # nastav to_minute. LIT může obsahovat i inline anotace jako
+            # "6' Nmecha F. (Wirtz F.)" — ty ignoruj (fullmatch jen pro čistý čas).
             to_minute = match_duration
             sub_out_str = kv.get("LIT", "")
             if sub_out_str:
-                m = re.match(r"(\d+)[\+\d]*'?", sub_out_str.strip())
-                if m:
-                    to_minute = int(m.group(1))
-                    extra = re.search(r"\+(\d+)'", sub_out_str)
-                    if extra:
-                        to_minute += int(extra.group(1))
+                pure_min = re.fullmatch(r"(\d+)(?:\+(\d+))?'?\s*", sub_out_str.strip())
+                if pure_min:
+                    to_minute = int(pure_min.group(1))
+                    if pure_min.group(2):
+                        to_minute += int(pure_min.group(2))
 
             players[key] = {
                 "player_external_id": pid or None,
