@@ -22,12 +22,13 @@ with col_btn:
                     from app.services.next_match_service import invalidate_match_cache
                     invalidate_match_cache()
                     if result.errors:
-                        st.error("\n".join(result.errors[:3]))
-                    else:
-                        parts = []
-                        if result.matches_added: parts.append(f"{result.matches_added} zápasů")
-                        if result.stats_added: parts.append(f"{result.stats_added} statistik")
-                        st.success("✅ " + (", ".join(parts) or "Nic nového"))
+                        st.error("\n".join(result.errors[:5]))
+                    parts = []
+                    if result.matches_added: parts.append(f"+{result.matches_added} zápasů")
+                    if result.matches_updated: parts.append(f"~{result.matches_updated} zápasů aktualizováno")
+                    if result.stats_added: parts.append(f"+{result.stats_added} statistik")
+                    if result.stats_updated: parts.append(f"~{result.stats_updated} statistik aktualizováno")
+                    st.success("✅ " + (", ".join(parts) or "Nic nového"))
                 except Exception as e:
                     st.error(str(e))
     st.markdown("</div>", unsafe_allow_html=True)
