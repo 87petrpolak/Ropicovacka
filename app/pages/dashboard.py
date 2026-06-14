@@ -144,15 +144,7 @@ nominated_pids = {
         LineupSlot.nomination_id.in_(nom_ids_q)
     ).all()
 }
-# Náhradník — přidej jen pokud skutečně nastoupil (played=True)
-sub_pids = {n.substitute_player_id for n in noms if n.substitute_player_id}
-for spid in sub_pids:
-    stats = db.query(PlayerMatchStats).filter(
-        PlayerMatchStats.player_id == spid,
-        PlayerMatchStats.played == True,
-    ).first()
-    if stats:
-        nominated_pids.add(spid)
+# Náhradníci se v nulové sekci nezobrazují — buď mají body (my_events) nebo vůbec
 event_pids = {ev["player"].id for ev in my_events}
 zero_rows = []
 for pid in nominated_pids - event_pids:
