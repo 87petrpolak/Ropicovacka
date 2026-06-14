@@ -33,18 +33,10 @@ def run_refresh(
                     continue
                 last_match_id = match.external_id or str(match.id)
                 if md.external_id:
-                    # Přeskoč stats pro dokončené zápasy které už mají statistiky v DB
-                    already_has_stats = (
-                        match.is_finished and
-                        db.query(PlayerMatchStats).filter(
-                            PlayerMatchStats.match_id == match.id
-                        ).first() is not None
-                    )
-                    if not already_has_stats:
-                        stats_data = provider.fetch_player_stats(md.external_id)
-                        for sd in stats_data:
-                            _upsert_stats(db, sd, match, result)
-                        _recompute_match_points(db, match, game_id)
+                    stats_data = provider.fetch_player_stats(md.external_id)
+                    for sd in stats_data:
+                        _upsert_stats(db, sd, match, result)
+                    _recompute_match_points(db, match, game_id)
 
         db.commit()
     except Exception as e:
