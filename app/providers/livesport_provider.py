@@ -406,12 +406,12 @@ class LivesportProvider(BaseFootballDataProvider):
         Přidá góly/asistence z df_sui_ feedu.
         Hráče kteří nastoupili jako náhradníci (střídání dovnitř) také přidá.
 
-        clean_sheet logika: gól soupeře v minutě G zruší clean_sheet všem
-        hráčům protivníka, kteří byli na hřišti v minutě G (_from <= G <= _to).
+        Rozhodující je stav skóre ve chvíli, kdy hráč opouští hřiště (_to):
+        - clean_sheet: gól soupeře v min G zruší bonus hráčům na hřišti v tu chvíli
+        - team_won: po zpracování všech incidentů se přepočítá podle skóre v minutě odchodu
         """
         def _get_or_create(key: str, name: str, pid: str, team_side: str, from_min: int = 0) -> dict:
             if key not in players:
-                team_won = (team_side == "1" and home_won) or (team_side == "2" and away_won)
                 players[key] = {
                     "player_external_id": pid or None,
                     "player_name": name,
@@ -420,13 +420,17 @@ class LivesportProvider(BaseFootballDataProvider):
                     "assists": 0,
                     "played": True,
                     "minutes_played": 0,
-                    "team_won": team_won,
+                    "team_won": False,
                     "clean_sheet": True,
                     "_side": team_side,
                     "_from": from_min,
                     "_to": match_duration,
                 }
             return players[key]
+
+        # Časová osa gólů: (minuta, střílející_strana)
+        # Vlastní gól se připíše protivníkovi
+        goals_timeline: list[tuple[int, str]] = []
 
         for block in raw.split("~"):
             if "III÷" not in block:
@@ -458,10 +462,19 @@ class LivesportProvider(BaseFootballDataProvider):
                 if ik == _INCIDENT_GOAL:
                     p = _get_or_create(key, name, pid, team_side)
                     p["goals"] += 1
-                    # Zruš clean_sheet hráčům protivníka kteří byli na hřišti v tuto minutu
+                    goals_timeline.append((minute, team_side))
+                    # Zruš clean_sheet protivníkům kteří byli na hřišti v tuto minutu
                     opposing_side = "2" if team_side == "1" else "1"
                     for op in players.values():
                         if op["_side"] == opposing_side and op["_from"] <= minute <= op["_to"]:
+                            op["clean_sheet"] = False
+
+                elif ik == _INCIDENT_OWN_GOAL:
+                    # Vlastní gól — přičítá se protivníkovi (skóre pro opačnou stranu)
+                    opposing_side = "2" if team_side == "1" else "1"
+                    goals_timeline.append((minute, opposing_side))
+                    for op in players.values():
+                        if op["_side"] == team_side and op["_from"] <= minute <= op["_to"]:
                             op["clean_sheet"] = False
 
                 elif ik in ("Asistence", "Asistace"):
@@ -473,4 +486,13 @@ class LivesportProvider(BaseFootballDataProvider):
                     p = _get_or_create(key, name, pid, team_side, from_min=minute)
                     p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
                     p["_from"] = min(p["_from"], minute)
+
+        # Přepočítej team_won podle skóre v minutě odchodu každého hráče
+        for player in players.values():
+            exit_min = player["_to"]
+            my_side = player["_side"]
+            opp_side = "2" if my_side == "1" else "1"
+            my_goals = sum(1 for m, s in goals_timeline if s == my_side and m <= exit_min)
+            opp_goals = sum(1 for m, s in goals_timeline if s == opp_side and m <= exit_min)
+            player["team_won"] = my_goals > opp_goals
 
