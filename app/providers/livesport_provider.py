@@ -234,45 +234,54 @@ class LivesportProvider(BaseFootballDataProvider):
         return matches
 
     def _fetch_from_live_feed(self, since: Optional[datetime]) -> list[MatchData]:
-        """Prochází dnešní feed a vrací dokončené zápasy daného turnaje."""
-        raw = _fetch("f_1_0_2_cs_1")
-        records = _parse_feed(raw)
-
+        """Prochází feed posledních 3 dnů + dnes a vrací zápasy daného turnaje."""
         matches = []
-        current_tournament_id = None
+        seen_ids: set[str] = set()
 
-        for rec in records:
-            if "ZEE" in rec:
-                current_tournament_id = rec.get("ZEE", "")
+        for day_offset in range(-3, 1):  # -3, -2, -1, 0
+            try:
+                raw = _fetch(f"f_1_{day_offset}_2_cs_1")
+            except Exception:
                 continue
-            if "AA" not in rec:
-                continue
-            if self.tournament_id and current_tournament_id != self.tournament_id:
-                continue
-            # AB=2 = live, AB=3 = dokončeno — obojí zpracujeme
-            if rec.get("AB") not in ("2", "3"):
-                continue
+            records = _parse_feed(raw)
+            current_tournament_id = None
 
-            played_at = None
-            raw_ts = rec.get("AD", "")
-            if raw_ts:
-                try:
-                    played_at = datetime.utcfromtimestamp(int(raw_ts))
-                except (ValueError, OSError):
-                    pass
+            for rec in records:
+                if "ZEE" in rec:
+                    current_tournament_id = rec.get("ZEE", "")
+                    continue
+                if "AA" not in rec:
+                    continue
+                if self.tournament_id and current_tournament_id != self.tournament_id:
+                    continue
+                # AB=2 = live, AB=3 = dokončeno — obojí zpracujeme
+                if rec.get("AB") not in ("2", "3"):
+                    continue
+                match_id = rec["AA"]
+                if match_id in seen_ids:
+                    continue
+                seen_ids.add(match_id)
 
-            if since and played_at and played_at <= since:
-                continue
+                played_at = None
+                raw_ts = rec.get("AD", "")
+                if raw_ts:
+                    try:
+                        played_at = datetime.utcfromtimestamp(int(raw_ts))
+                    except (ValueError, OSError):
+                        pass
 
-            matches.append(MatchData(
-                home_team=rec.get("AE", ""),
-                away_team=rec.get("AF", ""),
-                home_score=int(rec.get("AG", 0) or 0),
-                away_score=int(rec.get("AH", 0) or 0),
-                played_at=played_at,
-                external_id=rec["AA"],
-                is_finished=rec.get("AB") == "3",
-            ))
+                if since and played_at and played_at <= since:
+                    continue
+
+                matches.append(MatchData(
+                    home_team=rec.get("AE", ""),
+                    away_team=rec.get("AF", ""),
+                    home_score=int(rec.get("AG", 0) or 0),
+                    away_score=int(rec.get("AH", 0) or 0),
+                    played_at=played_at,
+                    external_id=match_id,
+                    is_finished=rec.get("AB") == "3",
+                ))
 
         return matches
 
