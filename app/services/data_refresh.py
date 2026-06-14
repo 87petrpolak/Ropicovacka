@@ -172,8 +172,7 @@ def _upsert_stats(db: Session, sd, match: Match, result: RefreshResult):
             FootballPlayer.name == sd.player_name
         ).first()
     if player is None:
-        result.errors.append(f"Player not found: {sd.player_name}")
-        return
+        return  # hráč není v našem kádru — přeskoč tiše
 
     existing = db.query(PlayerMatchStats).filter(
         PlayerMatchStats.match_id == match.id,
