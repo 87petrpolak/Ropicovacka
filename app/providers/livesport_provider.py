@@ -41,8 +41,8 @@ _HTML_HEADERS = {
 }
 _REQUEST_DELAY = 1.0
 
-# Flashscore tournament ID pro MS 2026
-WC_2026_TOURNAMENT_ID = "zeSHfCx3"
+# Flashscore tournament ID pro MS 2026 (ZEE pole v feed)
+WC_2026_TOURNAMENT_ID = "lvUBR5F8"
 
 # Mapování českých pozic na interní enum
 _POS_MAP = {
@@ -249,7 +249,8 @@ class LivesportProvider(BaseFootballDataProvider):
                 continue
             if self.tournament_id and current_tournament_id != self.tournament_id:
                 continue
-            if rec.get("AB") != "3":
+            # AB=2 = live, AB=3 = dokončeno — obojí zpracujeme
+            if rec.get("AB") not in ("2", "3"):
                 continue
 
             played_at = None
@@ -270,7 +271,7 @@ class LivesportProvider(BaseFootballDataProvider):
                 away_score=int(rec.get("AH", 0) or 0),
                 played_at=played_at,
                 external_id=rec["AA"],
-                is_finished=True,
+                is_finished=rec.get("AB") == "3",
             ))
 
         return matches
@@ -328,7 +329,10 @@ class LivesportProvider(BaseFootballDataProvider):
         LC÷1 = domácí tým, LC÷2 = hosté (odděluje bloky)
         LK÷1 = základní sestava, LK÷2 = náhradník (nenastoupil)
         LP = player external ID, LI = jméno
-        LIT = minuta střídání ven (např. "46'"), LIN = náhradník
+        LIT = minuta střídání ven (např. "46'")
+
+        clean_sheet se nastavuje optimisticky na True; _apply_incidents ho
+        zruší pokud gól padl zatímco byl hráč na hřišti.
         """
         players: dict[str, dict] = {}
         current_side = "1"  # LC÷1=domácí, LC÷2=hosté
@@ -358,19 +362,17 @@ class LivesportProvider(BaseFootballDataProvider):
             key = pid or name
 
             team_won = (current_side == "1" and home_won) or (current_side == "2" and away_won)
-            clean_sheet = (current_side == "1" and home_clean) or (current_side == "2" and away_clean)
 
             # Minuty: pokud má LIT (střídán ven), přečti minutu
-            minutes = match_duration
+            to_minute = match_duration
             sub_out_str = kv.get("LIT", "")
             if sub_out_str:
-                # LIT může být "46'" nebo "46' Gabriel Jesus (Martinelli G.)" — bereme číslo
                 m = re.match(r"(\d+)[\+\d]*'?", sub_out_str.strip())
                 if m:
-                    minutes = int(m.group(1))
+                    to_minute = int(m.group(1))
                     extra = re.search(r"\+(\d+)'", sub_out_str)
                     if extra:
-                        minutes += int(extra.group(1))
+                        to_minute += int(extra.group(1))
 
             players[key] = {
                 "player_external_id": pid or None,
@@ -379,10 +381,12 @@ class LivesportProvider(BaseFootballDataProvider):
                 "goals": 0,
                 "assists": 0,
                 "played": True,
-                "minutes_played": minutes,
+                "minutes_played": to_minute,
                 "team_won": team_won,
-                "clean_sheet": clean_sheet,
+                "clean_sheet": True,   # optimisticky; odvoláno při gólu soupeře zatímco byl na hřišti
                 "_side": current_side,
+                "_from": 0,
+                "_to": to_minute,
             }
 
         return players
@@ -401,11 +405,13 @@ class LivesportProvider(BaseFootballDataProvider):
         """
         Přidá góly/asistence z df_sui_ feedu.
         Hráče kteří nastoupili jako náhradníci (střídání dovnitř) také přidá.
+
+        clean_sheet logika: gól soupeře v minutě G zruší clean_sheet všem
+        hráčům protivníka, kteří byli na hřišti v minutě G (_from <= G <= _to).
         """
-        def _get_or_create(key: str, name: str, pid: str, team_side: str) -> dict:
+        def _get_or_create(key: str, name: str, pid: str, team_side: str, from_min: int = 0) -> dict:
             if key not in players:
                 team_won = (team_side == "1" and home_won) or (team_side == "2" and away_won)
-                clean_sheet = (team_side == "1" and home_clean) or (team_side == "2" and away_clean)
                 players[key] = {
                     "player_external_id": pid or None,
                     "player_name": name,
@@ -415,8 +421,10 @@ class LivesportProvider(BaseFootballDataProvider):
                     "played": True,
                     "minutes_played": 0,
                     "team_won": team_won,
-                    "clean_sheet": clean_sheet,
+                    "clean_sheet": True,
                     "_side": team_side,
+                    "_from": from_min,
+                    "_to": match_duration,
                 }
             return players[key]
 
@@ -434,7 +442,6 @@ class LivesportProvider(BaseFootballDataProvider):
             team_side = kv.get("IA", [""])[0]
             minute = _parse_minute(kv.get("IB", ["0"])[0])
 
-            ie_list = kv.get("IE", [])
             if_list = kv.get("IF", [])
             iu_list = kv.get("IU", [])
             im_list = kv.get("IM", [])
@@ -451,13 +458,19 @@ class LivesportProvider(BaseFootballDataProvider):
                 if ik == _INCIDENT_GOAL:
                     p = _get_or_create(key, name, pid, team_side)
                     p["goals"] += 1
+                    # Zruš clean_sheet hráčům protivníka kteří byli na hřišti v tuto minutu
+                    opposing_side = "2" if team_side == "1" else "1"
+                    for op in players.values():
+                        if op["_side"] == opposing_side and op["_from"] <= minute <= op["_to"]:
+                            op["clean_sheet"] = False
 
                 elif ik in ("Asistence", "Asistace"):
                     p = _get_or_create(key, name, pid, team_side)
                     p["assists"] += 1
 
                 elif ik == _INCIDENT_SUB_IN:
-                    # Střídající hráč — nastoupil, minuty = zbytek zápasu
-                    p = _get_or_create(key, name, pid, team_side)
+                    # Střídající hráč — nastoupil v minutě, minuty = zbytek zápasu
+                    p = _get_or_create(key, name, pid, team_side, from_min=minute)
                     p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
+                    p["_from"] = min(p["_from"], minute)
 
