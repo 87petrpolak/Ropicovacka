@@ -39,7 +39,7 @@ _HTML_HEADERS = {
     "Accept-Language": "cs-CZ,cs;q=0.9",
     "Referer": "https://www.livesport.cz/",
 }
-_REQUEST_DELAY = 1.0
+_REQUEST_DELAY = 0.3
 
 # Flashscore tournament ID pro MS 2026 (ZEE pole v feed)
 WC_2026_TOURNAMENT_ID = "lvUBR5F8"
