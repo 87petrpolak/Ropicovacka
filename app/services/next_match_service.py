@@ -19,7 +19,7 @@ _HEADERS = {
 WC_TOURNAMENT_ID = "lvUBR5F8"
 PRAGUE_TZ = timezone(timedelta(hours=2))  # CEST (léto)
 
-_CACHE_KEY_ALL = "ms_all_matches"
+_CACHE_KEY_ALL = "ms_all_matches_v2"  # v2: zahrnuje i odehrané zápasy (day -14)
 _CACHE_KEY_NEXT = "ms_next_matches"
 _CACHE_TTL_HOURS = 2
 
@@ -105,7 +105,7 @@ def _fetch_all_from_api() -> list[dict]:
     all_matches = []
     seen_ids: set[str] = set()
 
-    for day_offset in range(0, 35):
+    for day_offset in range(-14, 35):  # -14 = odehrané zápasy skupinové fáze
         try:
             raw = _fetch(f"f_1_{day_offset}_2_cs_1")
             records = _parse(raw)
