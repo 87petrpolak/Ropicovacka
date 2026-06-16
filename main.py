@@ -2,7 +2,13 @@
 import streamlit as st
 from app.db import init_db
 
-init_db()
+
+@st.cache_resource
+def _init_db_once():
+    init_db()
+
+
+_init_db_once()
 
 st.set_page_config(
     page_title="Ropičovačka 2026",
