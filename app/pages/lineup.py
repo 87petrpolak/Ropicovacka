@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import datetime
 from app.state import get_db, require_active_game
-from app.models.models import Participant, Round, DraftSession, FootballPlayer
+from app.models.models import Participant, Round, DraftSession, FootballPlayer, Match
 from app.services.draft_engine import get_participant_squad
 from app.services.lineup_manager import (
     get_or_create_nomination,
@@ -11,7 +11,6 @@ from app.services.lineup_manager import (
 )
 from app.models.models import LineupChangeLog
 from app.services.squad_validator import LINEUP_SIZE
-from app.services.next_match_service import get_next_matches
 from app.utils.time_utils import fmt_prague
 
 st.title("Nominace sestavy")
@@ -52,7 +51,9 @@ with col1:
 with col2:
     round_opts = {r.id: r.name for r in rounds}
     sel_round_id = st.selectbox(
-        "Kolo", list(round_opts.keys()), format_func=lambda rid: round_opts[rid]
+        "Kolo", list(round_opts.keys()),
+        index=len(rounds) - 1,
+        format_func=lambda rid: round_opts[rid],
     )
     selected_round = next(r for r in rounds if r.id == sel_round_id)
 
@@ -104,11 +105,13 @@ by_pos: dict[str, list] = {}
 for pl in squad:
     by_pos.setdefault(pl.position, []).append(pl)
 
-# Načti příští zápasy na úrovni stránky (mimo fragment) — cachováno 30 min
-try:
-    next_matches = get_next_matches()
-except Exception:
-    next_matches = {}
+# Zápasy vybraného kola — soupeř odpovídá konkrétnímu kolu, ne jen příštímu zápasu
+round_match_map: dict[str, dict] = {}
+for _m in db.query(Match).filter(Match.game_id == game_id, Match.round_id == selected_round.id).all():
+    _dt = fmt_prague(_m.played_at) if _m.played_at else ""
+    for _team, _opp in [(_m.home_team, _m.away_team), (_m.away_team, _m.home_team)]:
+        if _team:
+            round_match_map[_team] = {"opponent": _opp, "date_str": _dt}
 
 
 @st.fragment
@@ -123,7 +126,7 @@ def _lineup_form():
             continue
         st.caption(f"**{POS_LABELS[pos]}** — {POS_INFO.get(pos, '')}")
         for pl in sorted(pos_players, key=lambda x: x.name):
-            match_info = next_matches.get(pl.club or pl.country, {})
+            match_info = round_match_map.get(pl.club or pl.country, {})
             if match_info:
                 next_label = f"  —  vs {match_info['opponent']}, {match_info['date_str']}"
             else:

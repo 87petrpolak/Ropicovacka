@@ -44,7 +44,9 @@ if rounds:
     st.subheader("Pořadí v kole")
     round_opts = {r.id: f"Kolo {r.round_number}: {r.name}" for r in rounds}
     sel_round_id = st.selectbox(
-        "Vyber kolo", list(round_opts.keys()), format_func=lambda rid: round_opts[rid]
+        "Vyber kolo", list(round_opts.keys()),
+        index=len(rounds) - 1,
+        format_func=lambda rid: round_opts[rid],
     )
     round_rows = compute_round_leaderboard(db, game_id, sel_round_id)
     if round_rows:
