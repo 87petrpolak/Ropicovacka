@@ -1,7 +1,8 @@
 import streamlit as st
 from datetime import datetime
 from app.state import get_db, require_active_game
-from app.models.models import Participant, Round, DraftSession, FootballPlayer, Match
+from app.models.models import Participant, Round, DraftSession, FootballPlayer
+from app.services.next_match_service import get_all_ms_matches, PRAGUE_TZ
 from app.services.draft_engine import get_participant_squad
 from app.services.lineup_manager import (
     get_or_create_nomination,
@@ -105,13 +106,27 @@ by_pos: dict[str, list] = {}
 for pl in squad:
     by_pos.setdefault(pl.position, []).append(pl)
 
-# Zápasy vybraného kola — soupeř odpovídá konkrétnímu kolu, ne jen příštímu zápasu
-round_match_map: dict[str, dict] = {}
-for _m in db.query(Match).filter(Match.game_id == game_id, Match.round_id == selected_round.id).all():
-    _dt = fmt_prague(_m.played_at) if _m.played_at else ""
-    for _team, _opp in [(_m.home_team, _m.away_team), (_m.away_team, _m.home_team)]:
-        if _team:
-            round_match_map[_team] = {"opponent": _opp, "date_str": _dt}
+# Soupeř pro vybrané kolo — Nth zápas každého týmu z MS kalendáře (cachováno)
+# Funguje i pro budoucí kola, která ještě nejsou v DB.
+def _build_round_match_map(round_number: int) -> dict[str, dict]:
+    try:
+        all_matches = get_all_ms_matches()
+    except Exception:
+        return {}
+    team_count: dict[str, int] = {}
+    result: dict[str, dict] = {}
+    for m in all_matches:  # seřazeno dle played_at
+        home, away = m.get("home", ""), m.get("away", "")
+        dt_str = (m.get("date_str", "") + " " + m.get("time_str", "")).strip()
+        for team, opp in [(home, away), (away, home)]:
+            if not team:
+                continue
+            team_count[team] = team_count.get(team, 0) + 1
+            if team_count[team] == round_number:
+                result[team] = {"opponent": opp, "date_str": dt_str}
+    return result
+
+round_match_map = _build_round_match_map(selected_round.round_number)
 
 
 @st.fragment
