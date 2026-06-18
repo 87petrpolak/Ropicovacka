@@ -2,8 +2,10 @@
 import pandas as pd
 import streamlit as st
 from app.state import get_db, require_active_game
-from app.models.models import Participant, LineupNomination, LineupSlot, FootballPlayer, PlayerMatchStats, Match
+from app.models.models import Participant, LineupNomination, LineupSlot, FootballPlayer, PlayerMatchStats, Match, Round
 from app.services.cashflow import compute_events, compute_balances, cashflow_per_event, EVENT_LABELS
+
+
 
 col_title, col_btn = st.columns([4, 1])
 col_title.title("Dashboard")
@@ -107,15 +109,46 @@ st.divider()
 # ----------------------------------------------------------------
 st.subheader("Detail účastníka")
 
-sel_name = st.selectbox("Vyber účastníka", [p.name for p in participants])
-sel_p = next(p for p in participants if p.name == sel_name)
+# Příprava: kola a Nth zápas každého týmu
+rounds = db.query(Round).filter(Round.game_id == game_id).order_by(Round.round_number).all()
+rounds_by_id = {r.id: r for r in rounds}
 
-my_events = [ev for ev in events if ev["owner"].id == sel_p.id]
+all_game_matches = (
+    db.query(Match).filter(Match.game_id == game_id).order_by(Match.played_at).all()
+)
+team_matches: dict[str, list[int]] = {}  # team -> [match_id kola 1, kola 2, ...]
+_tc: dict[str, int] = {}
+for _m in all_game_matches:
+    for _team in (_m.home_team, _m.away_team):
+        if _team:
+            _tc[_team] = _tc.get(_team, 0) + 1
+            team_matches.setdefault(_team, []).append(_m.id)
+
+col_p, col_r = st.columns(2)
+with col_p:
+    sel_name = st.selectbox("Vyber účastníka", [p.name for p in participants])
+    sel_p = next(p for p in participants if p.name == sel_name)
+with col_r:
+    round_opts = {r.id: r.name for r in rounds}
+    sel_round_id = st.selectbox(
+        "Kolo",
+        list(round_opts.keys()),
+        index=len(rounds) - 1,
+        format_func=lambda rid: round_opts[rid],
+        key="detail_round",
+    )
+    sel_round = rounds_by_id[sel_round_id]
 
 others_count = len(participants) - 1
 
-if my_events:
-    sorted_my = sorted(my_events, key=lambda e: (e["match"].played_at or "", -e["event_value"]), reverse=True)
+# Eventy pro tohoto účastníka a vybrané kolo
+my_events_round = [
+    ev for ev in events
+    if ev["owner"].id == sel_p.id and ev.get("round") and ev["round"].id == sel_round_id
+]
+
+if my_events_round:
+    sorted_my = sorted(my_events_round, key=lambda e: (e["match"].played_at or "", -e["event_value"]), reverse=True)
     detail_rows = []
     for ev in sorted_my:
         match = ev["match"]
@@ -132,47 +165,64 @@ if my_events:
         })
     st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
-# Nominovaní hráči bez bodů (odehráli zápas, ale nic nevydělali)
-noms = db.query(LineupNomination).filter(
-    LineupNomination.participant_id == sel_p.id
-).all()
-nom_ids_q = [n.id for n in noms]
-
-# Základní sestava (11 hráčů)
-nominated_pids = {
-    s.player_id for s in db.query(LineupSlot).filter(
-        LineupSlot.nomination_id.in_(nom_ids_q)
-    ).all()
+# Nominovaní hráči bez bodů pro vybrané kolo
+event_match_set: set[tuple[int, int]] = {
+    (ev["player"].id, ev["match"].id) for ev in my_events_round
 }
-# Náhradníci se v nulové sekci nezobrazují — buď mají body (my_events) nebo vůbec
-event_pids = {ev["player"].id for ev in my_events}
+
+nom = db.query(LineupNomination).filter(
+    LineupNomination.participant_id == sel_p.id,
+    LineupNomination.round_id == sel_round_id,
+).first()
+
 zero_rows = []
-for pid in nominated_pids - event_pids:
-    played_stats = db.query(PlayerMatchStats).filter(
-        PlayerMatchStats.player_id == pid,
-        PlayerMatchStats.played == True,
-    ).all()
-    for s in played_stats:
-        match = db.get(Match, s.match_id)
+if nom:
+    slots = db.query(LineupSlot).filter(LineupSlot.nomination_id == nom.id).all()
+    for slot in slots:
+        pid = slot.player_id
         player = db.get(FootballPlayer, pid)
-        if match and player:
-            match_label = (
-                f"{match.home_team} {match.home_score}–{match.away_score} {match.away_team}"
-                if match.home_team else match.external_id
-            )
-            zero_rows.append({
-                "Zápas": match_label,
-                "Hráč": player.name,
-                "Post": player.position,
-                "Event": "—",
-                "Získáno": "0 Kč",
-            })
+        if not player:
+            continue
+        team = player.club or player.country
+        if not team:
+            continue
+        team_match_ids = team_matches.get(team, [])
+        idx = sel_round.round_number - 1
+        if idx < 0 or idx >= len(team_match_ids):
+            continue
+        match_id = team_match_ids[idx]
+        if (pid, match_id) in event_match_set:
+            continue  # Má body → zobrazí se nahoře
+        stat = db.query(PlayerMatchStats).filter(
+            PlayerMatchStats.player_id == pid,
+            PlayerMatchStats.match_id == match_id,
+            PlayerMatchStats.played == True,
+        ).first()
+        if not stat:
+            continue
+        match = db.get(Match, match_id)
+        if not match:
+            continue
+        match_label = (
+            f"{match.home_team} {match.home_score}–{match.away_score} {match.away_team}"
+            if match.home_team else match.external_id
+        )
+        zero_rows.append({
+            "Zápas": match_label,
+            "Hráč": player.name,
+            "Post": player.position,
+            "Event": "—",
+            "Získáno": "0 Kč",
+        })
 
 if zero_rows:
-    if my_events:
+    if my_events_round:
         st.caption("Hráči bez bodů v odehraných zápasech:")
     st.dataframe(pd.DataFrame(zero_rows), use_container_width=True, hide_index=True)
 
-if not my_events and not zero_rows:
-    st.info("Tento účastník zatím nemá žádné body.")
+if not my_events_round and not zero_rows:
+    if not nom:
+        st.info(f"Pro {sel_round.name} zatím není uložena nominace.")
+    else:
+        st.info("Žádné odehrané zápasy v tomto kole.")
     st.metric("Celkový zůstatek", f"{balances[sel_p.id]:+.0f} Kč")

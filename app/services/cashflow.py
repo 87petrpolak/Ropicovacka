@@ -206,6 +206,7 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
                 "player":        player,
                 "owner":         owner,
                 "match":         match,
+                "round":         effective_round,
                 "event_type":    event_type,
                 "event_value":   value * captain_multiplier,
                 "is_captain":    is_captain,
