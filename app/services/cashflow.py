@@ -131,35 +131,37 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
         is_captain = False
         is_substitute = False
 
-        if round_id and round_id in nominated:
-            owner_nominations = nominated[round_id].get(owner.id, set())
-            owner_captain = captain_ids.get(round_id, {}).get(owner.id)
-            owner_sub = substitute_ids.get(round_id, {}).get(owner.id)
-            played = played_in_round.get(round_id, set())
+        if round_id not in nominated:
+            continue  # Kolo bez nominací — body se nepočítají
 
-            if player.id == owner_sub:
-                # Náhradník — aktivuje se jen pokud někdo z 11 nenastoupil
-                # a náhradník má kompatibilní pozici (GK→GK, outfield→outfield)
-                non_playing = owner_nominations - played
-                if non_playing:
-                    sub_player = db.get(FootballPlayer, player.id)
-                    sub_is_gk = Position(sub_player.position) == Position.GK
-                    replaceable = any(
-                        (Position(db.get(FootballPlayer, pid).position) == Position.GK) == sub_is_gk
-                        for pid in non_playing
-                        if db.get(FootballPlayer, pid)
-                    )
-                    if not replaceable:
-                        continue
-                    is_substitute = True
-                else:
-                    continue  # Všichni nastoupili, náhradník se nepočítá
+        owner_nominations = nominated[round_id].get(owner.id, set())
+        owner_captain = captain_ids.get(round_id, {}).get(owner.id)
+        owner_sub = substitute_ids.get(round_id, {}).get(owner.id)
+        played = played_in_round.get(round_id, set())
 
-            elif player.id in owner_nominations:
-                # Základní hráč — musí být nominován
-                is_captain = (player.id == owner_captain)
+        if player.id == owner_sub:
+            # Náhradník — aktivuje se jen pokud někdo z 11 nenastoupil
+            # a náhradník má kompatibilní pozici (GK→GK, outfield→outfield)
+            non_playing = owner_nominations - played
+            if non_playing:
+                sub_player = db.get(FootballPlayer, player.id)
+                sub_is_gk = Position(sub_player.position) == Position.GK
+                replaceable = any(
+                    (Position(db.get(FootballPlayer, pid).position) == Position.GK) == sub_is_gk
+                    for pid in non_playing
+                    if db.get(FootballPlayer, pid)
+                )
+                if not replaceable:
+                    continue
+                is_substitute = True
             else:
-                continue  # Hráč není nominován ani náhradník
+                continue  # Všichni nastoupili, náhradník se nepočítá
+
+        elif player.id in owner_nominations:
+            # Základní hráč — musí být nominován
+            is_captain = (player.id == owner_captain)
+        else:
+            continue  # Hráč není nominován ani náhradník
 
         bd = compute_points(stats, Position(player.position), scoring_rules)
         captain_multiplier = 2 if is_captain else 1
