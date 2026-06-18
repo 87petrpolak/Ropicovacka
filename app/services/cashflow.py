@@ -53,10 +53,11 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
     Vrátí bodované eventy pro tuto hru.
 
     Logika:
+    - Kolo zápasu se určuje z pohledu hráčova týmu: Nth zápas tohoto týmu = Kolo N.
     - Pro kola KDE existují nominace: počítají se pouze nominovaní hráči.
-    - Pro kola BEZ nominací: počítají se všichni hráči z draftu (fallback pro testování).
+    - Pro kola BEZ nominací: žádné body (kolo přeskočíme).
 
-    Každý event: {player, owner, match, round, event_type, event_value}
+    Každý event: {player, owner, match, event_type, event_value}
     """
     player_owner = get_player_owner_map(db, game_id)
     if not player_owner:
@@ -98,19 +99,44 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
             captain_ids[round_.id] = round_captains
             substitute_ids[round_.id] = round_subs
 
-        # Zjisti kteří hráči nastoupili v zápasech tohoto kola
-        matches_in_round = db.query(Match).filter(
-            Match.game_id == game_id, Match.round_id == round_.id
-        ).all()
-        played = set()
-        for m in matches_in_round:
-            stats_list = db.query(PlayerMatchStats).filter(
-                PlayerMatchStats.match_id == m.id,
-                PlayerMatchStats.minutes_played > 0,
-            ).all()
-            played.update(s.player_id for s in stats_list)
-        if played:
-            played_in_round[round_.id] = played
+    # Pro každý zápas a každý tým: kolikátý je to zápas tohoto týmu v chronologickém pořadí.
+    # Tím zjistíme kolo z pohledu hráčova týmu (nezávisle na match.round_id, který mohl být
+    # přiřazen podle domácího týmu a je tak nesprávný pro hostující tým z jiné skupiny).
+    rounds_by_number = {r.round_number: r for r in rounds}
+
+    all_game_matches = (
+        db.query(Match)
+        .filter(Match.game_id == game_id)
+        .order_by(Match.played_at)
+        .all()
+    )
+    # (match_id, team) -> round_number (1-based)
+    match_team_round: dict[tuple[int, str], int] = {}
+    _team_count: dict[str, int] = {}
+    for m in all_game_matches:
+        for team in (m.home_team, m.away_team):
+            if team:
+                _team_count[team] = _team_count.get(team, 0) + 1
+                match_team_round[(m.id, team)] = _team_count[team]
+
+    # played_in_round[round_id][team] = set of player_ids kteří nastoupili (pro náhradníka)
+    # Sestavíme dle match_team_round, ne match.round_id
+    all_match_stats = (
+        db.query(PlayerMatchStats, FootballPlayer, Match)
+        .join(FootballPlayer, PlayerMatchStats.player_id == FootballPlayer.id)
+        .join(Match, PlayerMatchStats.match_id == Match.id)
+        .filter(Match.game_id == game_id, PlayerMatchStats.minutes_played > 0)
+        .all()
+    )
+    for _s, _fp, _m in all_match_stats:
+        _pt = _fp.club or _fp.country
+        _rn = match_team_round.get((_m.id, _pt))
+        if _rn is None:
+            continue
+        _r = rounds_by_number.get(_rn)
+        if _r is None:
+            continue
+        played_in_round.setdefault(_r.id, set()).add(_fp.id)
 
     events = []
     all_stats = (
@@ -127,7 +153,16 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
         if owner is None:
             continue
 
-        round_id = match.round_id
+        # Zjisti kolo z pohledu hráčova týmu (Nth zápas tohoto týmu = kolo N)
+        player_team = player.club or player.country
+        effective_round_number = match_team_round.get((match.id, player_team))
+        if effective_round_number is None:
+            continue
+        effective_round = rounds_by_number.get(effective_round_number)
+        if effective_round is None:
+            continue  # Zápas patří do kola, které není definováno (playoff apod.)
+        round_id = effective_round.id
+
         is_captain = False
         is_substitute = False
 
