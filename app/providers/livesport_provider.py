@@ -375,14 +375,21 @@ class LivesportProvider(BaseFootballDataProvider):
             # Minuty: pokud má LIT čistou minutu střídání (např. "73'" nebo "45+2'"),
             # nastav to_minute. LIT může obsahovat i inline anotace jako
             # "6' Nmecha F. (Wirtz F.)" — ty ignoruj (fullmatch jen pro čistý čas).
-            to_minute = match_duration
+            # minutes_played = konvenční čas (do střídání nebo 90)
+            # _to = okno pro clean_sheet/team_won výpočty:
+            #   - střídán ven → _to = minuta střídání
+            #   - hrál do konce → _to = 200 (pokryje prodloužení a nastavený čas)
+            minutes_played = match_duration
+            _to = 200  # default: hrál do konce, včetně nastavení
             sub_out_str = kv.get("LIT", "")
             if sub_out_str:
                 pure_min = re.fullmatch(r"(\d+)(?:\+(\d+))?'?\s*", sub_out_str.strip())
                 if pure_min:
-                    to_minute = int(pure_min.group(1))
+                    sub_minute = int(pure_min.group(1))
                     if pure_min.group(2):
-                        to_minute += int(pure_min.group(2))
+                        sub_minute += int(pure_min.group(2))
+                    minutes_played = sub_minute
+                    _to = sub_minute  # střídán ven → okno končí minutou střídání
 
             players[key] = {
                 "player_external_id": pid or None,
@@ -391,12 +398,12 @@ class LivesportProvider(BaseFootballDataProvider):
                 "goals": 0,
                 "assists": 0,
                 "played": True,
-                "minutes_played": to_minute,
+                "minutes_played": minutes_played,
                 "team_won": team_won,
                 "clean_sheet": True,   # optimisticky; odvoláno při gólu soupeře zatímco byl na hřišti
                 "_side": current_side,
                 "_from": 0,
-                "_to": to_minute,
+                "_to": _to,
             }
 
         return players
@@ -434,7 +441,7 @@ class LivesportProvider(BaseFootballDataProvider):
                     "clean_sheet": True,
                     "_side": team_side,
                     "_from": from_min,
-                    "_to": match_duration,
+                    "_to": 200,  # hraje do konce zápasu včetně nastavení
                 }
             return players[key]
 
