@@ -35,6 +35,7 @@ round_opts = {r.id: r.name for r in rounds}
 sel_round_id = st.selectbox(
     "Kolo",
     list(round_opts.keys()),
+    index=len(rounds) - 1,
     format_func=lambda rid: round_opts[rid],
 )
 selected_round = next(r for r in rounds if r.id == sel_round_id)
