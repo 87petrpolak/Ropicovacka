@@ -1,15 +1,16 @@
 """
 Kalendář zápasů — zobrazuje jen zápasy kde máme nominované hráče.
+Timeline: odehrané nahoře, nadcházející dole, auto-scroll na první nadcházející.
 """
 import streamlit as st
+import streamlit.components.v1 as components
 from collections import defaultdict
-from datetime import timezone, timedelta
+from datetime import datetime, timezone, timedelta
 from app.state import get_db, require_active_game
 from app.models.models import (
     Participant, Round, LineupNomination, LineupSlot, FootballPlayer, DraftSession
 )
 from app.services.next_match_service import get_all_ms_matches
-from app.services.draft_engine import get_participant_squad
 
 st.title("📅 Kalendář zápasů")
 
@@ -30,7 +31,6 @@ if not rounds:
     st.info("Nejsou definována žádná kola. Přejdi na **Administrace**.")
     st.stop()
 
-# Výběr kola
 round_opts = {r.id: r.name for r in rounds}
 sel_round_id = st.selectbox(
     "Kolo",
@@ -46,18 +46,12 @@ st.divider()
 # Barvy a ikony účastníků
 # ----------------------------------------------------------------
 PARTICIPANT_COLORS = ["🔵", "🟡", "🔴"]
-PARTICIPANT_BG = ["#e8f4fd", "#fffbe6", "#fdecea"]
 
 # ----------------------------------------------------------------
 # Načti nominované hráče pro každého účastníka v tomto kole
-# hrac_id → {participant, player}
 # ----------------------------------------------------------------
-session = db.query(DraftSession).filter(
-    DraftSession.game_id == game_id
-).order_by(DraftSession.id.desc()).first()
-
-nominated: dict[int, dict] = {}   # player_id → {participant, player}
-team_to_players: dict[str, list[dict]] = defaultdict(list)  # team_name → [{participant, player}]
+nominated: dict[int, dict] = {}
+team_to_players: dict[str, list[dict]] = defaultdict(list)
 
 for i, participant in enumerate(participants):
     nom = db.query(LineupNomination).filter(
@@ -78,16 +72,14 @@ for i, participant in enumerate(participants):
         team = player.club or player.country
         if not team:
             continue
-        entry = {
+        team_to_players[team].append({
             "participant": participant,
             "player": player,
             "icon": PARTICIPANT_COLORS[i % len(PARTICIPANT_COLORS)],
             "is_captain": (player.id == captain_id),
             "is_substitute": False,
-        }
-        team_to_players[team].append(entry)
+        })
 
-    # Přidej náhradníka
     if substitute_id:
         sub = db.get(FootballPlayer, substitute_id)
         if sub:
@@ -106,6 +98,43 @@ if not team_to_players:
     st.stop()
 
 # ----------------------------------------------------------------
+# Vyber zápasy pro dané kolo — Nth zápas každého týmu
+# ----------------------------------------------------------------
+try:
+    all_matches = get_all_ms_matches()
+except Exception:
+    all_matches = []
+
+nominated_teams = set(team_to_players.keys())
+round_number = selected_round.round_number
+
+team_count: dict[str, int] = {}
+match_for_team: dict[str, dict] = {}
+
+for m in all_matches:  # seřazeno dle played_at
+    home, away = m.get("home", ""), m.get("away", "")
+    for team, opp in [(home, away), (away, home)]:
+        if not team:
+            continue
+        team_count[team] = team_count.get(team, 0) + 1
+        if team_count[team] == round_number:
+            match_for_team[team] = m
+
+seen_ids: set[str] = set()
+relevant: list[dict] = []
+for team in nominated_teams:
+    m = match_for_team.get(team)
+    if m and m.get("match_id") not in seen_ids:
+        seen_ids.add(m["match_id"])
+        relevant.append(m)
+
+if not relevant:
+    st.info("Žádné zápasy pro nominované týmy nenalezeny. Data se načítají z Flashscore.")
+    st.stop()
+
+relevant.sort(key=lambda x: x.get("played_at") or datetime.max.replace(tzinfo=timezone.utc))
+
+# ----------------------------------------------------------------
 # Vlajky týmů
 # ----------------------------------------------------------------
 FLAGS: dict[str, str] = {
@@ -122,83 +151,111 @@ FLAGS: dict[str, str] = {
     "Kapverdy": "🇨🇻", "Curacao": "🇨🇼", "DR Kongo": "🇨🇩", "Alžírsko": "🇩🇿",
     "Jihoafrická republika": "🇿🇦", "Katar": "🇶🇦", "Panama": "🇵🇦",
     "Bosna a Hercegovina": "🇧🇦", "Haiti": "🇭🇹", "Skotsko": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Česko": "🇨🇿", "Švédsko": "🇸🇪", "Švédsko": "🇸🇪",
 }
 
 def flag(team: str) -> str:
     return FLAGS.get(team, "⚽")
 
 # ----------------------------------------------------------------
-# Načti všechny MS zápasy a filtruj relevantní
+# Najdi index prvního nadcházejícího zápasu (split point)
 # ----------------------------------------------------------------
-try:
-    all_matches = get_all_ms_matches()
-except Exception:
-    all_matches = []
-
-relevant = [
-    m for m in all_matches
-    if m["home"] in team_to_players or m["away"] in team_to_players
-]
-
-if not relevant:
-    st.info("Žádné zápasy pro nominované týmy nenalezeny. Data se načítají z Flashscore.")
-    st.stop()
-
-# ----------------------------------------------------------------
-# Seskup podle data a zobraz
-# ----------------------------------------------------------------
-by_date: dict[str, list] = defaultdict(list)
-for m in relevant:
-    by_date[m["date_str"] or "?"].append(m)
-
-CZ_DAYS = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
 PRAGUE_TZ = timezone(timedelta(hours=2))
+CZ_DAYS = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
 
-def date_heading(m: dict) -> str:
-    if m.get("played_at"):
-        dt = m["played_at"].astimezone(PRAGUE_TZ)
-        day = CZ_DAYS[dt.weekday()]
-        return f"{m['date_str']} ({day})"
-    return m["date_str"] or "?"
+now_utc = datetime.now(tz=timezone.utc)
+split_idx = len(relevant)
+for i, m in enumerate(relevant):
+    pa = m.get("played_at")
+    if pa:
+        if pa.tzinfo is None:
+            pa = pa.replace(tzinfo=timezone.utc)
+        if pa > now_utc and m.get("status") != "3":
+            split_idx = i
+            break
 
-for date_label, matches in by_date.items():
-    heading = date_heading(matches[0])
-    st.markdown(f"### 📆 {heading}")
+# ----------------------------------------------------------------
+# Render zápasů
+# ----------------------------------------------------------------
+def render_match(m: dict, dimmed: bool = False) -> None:
+    home, away = m["home"], m["away"]
+    is_finished = m["status"] == "3"
 
-    for m in matches:
-        home, away = m["home"], m["away"]
-        is_finished = m["status"] == "3"
-        time_label = "✅ odehráno" if is_finished else f"🕐 {m['time_str']}"
+    if is_finished:
+        time_label = "✅ odehráno"
+    else:
+        pa = m.get("played_at")
+        if pa:
+            if pa.tzinfo is None:
+                pa = pa.replace(tzinfo=timezone.utc)
+            dt_prague = pa.astimezone(PRAGUE_TZ)
+            time_label = f"🕐 {dt_prague.strftime('%-d.%-m. %H:%M')}"
+        else:
+            time_label = f"🕐 {m.get('time_str', '?')}"
 
-        # Hlavička zápasu
-        col_h, col_vs, col_a, col_t = st.columns([3, 1, 3, 2])
-        with col_h:
-            st.markdown(f"**{flag(home)} {home}**")
-        with col_vs:
-            st.markdown("<div style='text-align:center;font-weight:bold;'>vs</div>", unsafe_allow_html=True)
-        with col_a:
-            st.markdown(f"**{flag(away)} {away}**")
-        with col_t:
-            st.markdown(f"<div style='text-align:right;color:gray;'>{time_label}</div>", unsafe_allow_html=True)
+    opacity = "0.5" if dimmed else "1.0"
+    st.markdown(
+        f"<div style='opacity:{opacity}'>",
+        unsafe_allow_html=True,
+    )
+    col_h, col_vs, col_a, col_t = st.columns([3, 1, 3, 2])
+    with col_h:
+        st.markdown(f"**{flag(home)} {home}**")
+    with col_vs:
+        st.markdown("<div style='text-align:center;font-weight:bold;'>vs</div>", unsafe_allow_html=True)
+    with col_a:
+        st.markdown(f"**{flag(away)} {away}**")
+    with col_t:
+        st.markdown(f"<div style='text-align:right;color:gray;'>{time_label}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        # Nominovaní hráči v tomto zápasu
-        match_players: list[dict] = team_to_players.get(home, []) + team_to_players.get(away, [])
+    match_players: list[dict] = team_to_players.get(home, []) + team_to_players.get(away, [])
+    by_participant: dict[str, list] = defaultdict(list)
+    for entry in match_players:
+        by_participant[entry["participant"].name].append(entry)
 
-        # Seskup podle účastníka
-        by_participant: dict[str, list] = defaultdict(list)
-        for entry in match_players:
-            by_participant[entry["participant"].name].append(entry)
+    for p_name, entries in by_participant.items():
+        icon = entries[0]["icon"]
+        player_names = []
+        for e in sorted(entries, key=lambda x: (x["is_substitute"], x["player"].name)):
+            name = e["player"].name
+            if e["is_captain"]:
+                name += " 🅲"
+            if e["is_substitute"]:
+                name = f"🔄 {name}"
+            player_names.append(name)
+        opacity_style = f"opacity:{opacity};" if dimmed else ""
+        st.markdown(
+            f"<div style='{opacity_style}'>{icon} <b>{p_name}:</b> {', '.join(player_names)}</div>",
+            unsafe_allow_html=True,
+        )
 
-        for p_name, entries in by_participant.items():
-            icon = entries[0]["icon"]
-            player_names = []
-            for e in sorted(entries, key=lambda x: (x["is_substitute"], x["player"].name)):
-                name = e["player"].name
-                if e["is_captain"]:
-                    name += " 🅲"
-                if e["is_substitute"]:
-                    name = f"🔄 {name}"
-                player_names.append(name)
-            st.caption(f"{icon} **{p_name}:** {', '.join(player_names)}")
+    st.divider()
 
-        st.divider()
+
+# Odehrané zápasy (ztlumené)
+for m in relevant[:split_idx]:
+    render_match(m, dimmed=True)
+
+# Marker pro auto-scroll
+st.markdown('<div id="calendar-now"></div>', unsafe_allow_html=True)
+
+# Nadcházející zápasy
+for m in relevant[split_idx:]:
+    render_match(m, dimmed=False)
+
+# Auto-scroll na první nadcházející zápas (jen pokud existují odehrané)
+if split_idx > 0:
+    components.html("""
+    <script>
+    const scroll = () => {
+        const el = window.parent.document.getElementById('calendar-now');
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            setTimeout(scroll, 200);
+        }
+    };
+    setTimeout(scroll, 400);
+    </script>
+    """, height=0)
