@@ -112,12 +112,16 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
     )
     # (match_id, team) -> round_number (1-based)
     match_team_round: dict[tuple[int, str], int] = {}
+    # (team, round_number) -> Match — pro zjištění, zda zápas už proběhl
+    team_round_match: dict[tuple[str, int], Match] = {}
     _team_count: dict[str, int] = {}
     for m in all_game_matches:
         for team in (m.home_team, m.away_team):
             if team:
                 _team_count[team] = _team_count.get(team, 0) + 1
-                match_team_round[(m.id, team)] = _team_count[team]
+                rn = _team_count[team]
+                match_team_round[(m.id, team)] = rn
+                team_round_match[(team, rn)] = m
 
     # played_in_round[round_id][team] = set of player_ids kteří nastoupili (pro náhradníka)
     # Sestavíme dle match_team_round, ne match.round_id
@@ -175,9 +179,21 @@ def compute_events(db: Session, game_id: int) -> list[dict]:
         played = played_in_round.get(round_id, set())
 
         if player.id == owner_sub:
-            # Náhradník — aktivuje se jen pokud někdo z 11 nenastoupil
-            # a náhradník má kompatibilní pozici (GK→GK, outfield→outfield)
-            non_playing = owner_nominations - played
+            # Náhradník — aktivuje se jen pokud někdo z 11 nenastoupil V UŽ ODEHRANÉM zápase.
+            # Hráči, jejichž zápas ještě neproběhl, se nepočítají jako "absent".
+            non_playing = set()
+            for _pid in owner_nominations:
+                if _pid in played:
+                    continue  # Nastoupil — OK
+                _fp = db.get(FootballPlayer, _pid)
+                if not _fp:
+                    continue
+                _team = _fp.club or _fp.country
+                if not _team:
+                    continue
+                _nom_match = team_round_match.get((_team, effective_round_number))
+                if _nom_match and _nom_match.is_finished:
+                    non_playing.add(_pid)  # Zápas dohrán, hráč nenastoupil → absent
             if non_playing:
                 sub_player = db.get(FootballPlayer, player.id)
                 sub_is_gk = Position(sub_player.position) == Position.GK
