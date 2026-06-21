@@ -504,7 +504,8 @@ class LivesportProvider(BaseFootballDataProvider):
                     p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
                     p["_from"] = min(p["_from"], minute)
 
-        # Přepočítej team_won podle skóre v minutě odchodu každého hráče
+        # Přepočítej team_won i clean_sheet z goals_timeline při odchodu každého hráče.
+        # Tím zaručíme konzistenci — obě hodnoty vycházejí ze stejného zdroje pravdy.
         for player in players.values():
             exit_min = player["_to"]
             my_side = player["_side"]
@@ -512,4 +513,5 @@ class LivesportProvider(BaseFootballDataProvider):
             my_goals = sum(1 for m, s in goals_timeline if s == my_side and m <= exit_min)
             opp_goals = sum(1 for m, s in goals_timeline if s == opp_side and m <= exit_min)
             player["team_won"] = my_goals > opp_goals
+            player["clean_sheet"] = opp_goals == 0
 
