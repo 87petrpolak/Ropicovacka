@@ -504,8 +504,12 @@ class LivesportProvider(BaseFootballDataProvider):
                     p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
                     p["_from"] = min(p["_from"], minute)
 
-        # Přepočítej team_won i clean_sheet z goals_timeline při odchodu každého hráče.
-        # Tím zaručíme konzistenci — obě hodnoty vycházejí ze stejného zdroje pravdy.
+        # Přepočítej team_won i clean_sheet při odchodu každého hráče.
+        # team_won: z goals_timeline (snapshot ve chvíli odchodu).
+        # clean_sheet: ground truth je skóre (home_clean/away_clean); goals_timeline
+        #   slouží jen pro hráče vystřídané před gólem soupeře. Tím se vyhneme
+        #   situaci kde feed obsahuje "Penalta" pro neproměněnou penaltu — ta by
+        #   neoprávněně přidala entry do goals_timeline a zrušila clean_sheet.
         for player in players.values():
             exit_min = player["_to"]
             my_side = player["_side"]
@@ -513,5 +517,12 @@ class LivesportProvider(BaseFootballDataProvider):
             my_goals = sum(1 for m, s in goals_timeline if s == my_side and m <= exit_min)
             opp_goals = sum(1 for m, s in goals_timeline if s == opp_side and m <= exit_min)
             player["team_won"] = my_goals > opp_goals
-            player["clean_sheet"] = opp_goals == 0
+            # Finální čisté konto dle skóre (metadata)
+            team_kept_clean = home_clean if my_side == "1" else away_clean
+            if team_kept_clean:
+                # Tým neobdržel gól — hráč má clean_sheet vždy (žádný gól nemohl padnout)
+                player["clean_sheet"] = True
+            else:
+                # Tým gól obdržel — hráč má clean_sheet jen pokud ho opustil před prvním gólem
+                player["clean_sheet"] = opp_goals == 0
 
