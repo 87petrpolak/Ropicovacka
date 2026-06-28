@@ -173,6 +173,28 @@ else:
     st.info("Pro správu nominací potřebuješ alespoň jednoho účastníka, jedno kolo a draft session.")
 
 st.divider()
+st.subheader("Debug: zápasy z Flashscore")
+if st.button("🔍 Zobraz zápasy z Flashscore (debug)"):
+    from app.services.next_match_service import get_all_ms_matches
+    try:
+        matches = get_all_ms_matches()
+        st.write(f"Celkem zápasů: {len(matches)}")
+        team_count: dict[str, int] = {}
+        for m in matches:
+            for team in [m.get("home", ""), m.get("away", "")]:
+                if team:
+                    team_count[team] = team_count.get(team, 0) + 1
+        debug_teams = ["Francie", "Argentína", "Argentina", "Švýcarsko", "Portugalsko", "Egypt"]
+        for t in debug_teams:
+            cnt = team_count.get(t, 0)
+            st.write(f"  {t}: {cnt} zápasů")
+        with st.expander("Posledních 10 zápasů"):
+            for m in matches[-10:]:
+                st.write(m)
+    except Exception as e:
+        st.error(f"Chyba: {e}")
+
+st.divider()
 st.subheader("Playoff posily")
 st.caption("Přidá 9 hráčů (3 per účastník) draftovaných před play-off MS 2026.")
 if st.button("➕ Přidat playoff posily do kádru", type="primary"):
