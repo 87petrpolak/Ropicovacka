@@ -171,3 +171,63 @@ if rounds and participants and sessions:
         st.rerun()
 else:
     st.info("Pro správu nominací potřebuješ alespoň jednoho účastníka, jedno kolo a draft session.")
+
+st.divider()
+st.subheader("Playoff posily")
+st.caption("Přidá 9 hráčů (3 per účastník) draftovaných před play-off MS 2026.")
+if st.button("➕ Přidat playoff posily do kádru", type="primary"):
+    from app.models.models import FootballPlayer, DraftSession, DraftPick
+    from app.db import _PLAYOFF_PICKS
+
+    session = db.query(DraftSession).filter(
+        DraftSession.game_id == game_id
+    ).order_by(DraftSession.id.desc()).first()
+
+    if not session:
+        st.error("Nenalezena draft session.")
+    else:
+        participants_map = {p.name.lower(): p for p in participants}
+        existing_picks = db.query(DraftPick).filter(DraftPick.session_id == session.id).all()
+        max_pick = max((p.pick_number for p in existing_picks), default=0)
+        max_round = max((p.round_number for p in existing_picks), default=0)
+        existing_player_ids = {p.player_id for p in existing_picks}
+        playoff_round = max_round + 1
+        added, skipped = [], []
+
+        for p_name, pl_name, country, position, club in _PLAYOFF_PICKS:
+            participant = participants_map.get(p_name.lower())
+            if not participant:
+                skipped.append(f"{pl_name} — účastník '{p_name}' nenalezen")
+                continue
+
+            player = db.query(FootballPlayer).filter(
+                FootballPlayer.name == pl_name,
+                FootballPlayer.club == club,
+            ).first()
+            if not player:
+                player = FootballPlayer(name=pl_name, country=country, position=position, club=club)
+                db.add(player)
+                db.flush()
+
+            if player.id in existing_player_ids:
+                skipped.append(f"{pl_name} — již v draftu")
+                continue
+
+            max_pick += 1
+            db.add(DraftPick(
+                session_id=session.id,
+                participant_id=participant.id,
+                player_id=player.id,
+                pick_number=max_pick,
+                round_number=playoff_round,
+            ))
+            existing_player_ids.add(player.id)
+            added.append(f"{pl_name} → {participant.name}")
+
+        db.commit()
+        if added:
+            st.success("Přidáno:\n" + "\n".join(f"- {x}" for x in added))
+        if skipped:
+            st.warning("Přeskočeno:\n" + "\n".join(f"- {x}" for x in skipped))
+        if not added and not skipped:
+            st.info("Nic k přidání.")
