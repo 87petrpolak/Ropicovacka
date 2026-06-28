@@ -194,6 +194,33 @@ if st.button("🔄 Vynutit refresh zápasů z Flashscore"):
     except Exception as e:
         st.error(f"Chyba: {e}")
 
+if st.button("🔍 Debug parsování dne 0"):
+    import requests
+    WC_ID = "lvUBR5F8"
+    _BASE = "https://1.flashscore.ninja/1/x/feed"
+    _HEADERS = {"x-fsign": "SW9D1eZo", "Referer": "https://www.livesport.cz/", "User-Agent": "Mozilla/5.0"}
+    for day_off in [0, 1, 2]:
+        r = requests.get(f"{_BASE}/f_1_{day_off}_2_cs_1", headers=_HEADERS, timeout=10)
+        raw = r.text
+        in_wc = False
+        wc_matches = []
+        prev_zee = ""
+        for block in raw.split("~"):
+            rec: dict[str, str] = {}
+            for pair in block.split("¬"):
+                if "÷" in pair:
+                    k, _, v = pair.partition("÷")
+                    rec[k] = v
+            if "ZEE" in rec:
+                prev_zee = rec["ZEE"]
+                in_wc = rec["ZEE"] == WC_ID
+                continue
+            if in_wc and "AA" in rec and "AE" in rec:
+                wc_matches.append(f"{rec.get('AE','')} vs {rec.get('AF','')} (ZEE={prev_zee})")
+        st.write(f"**Den {day_off}:** {len(wc_matches)} WC zápasů")
+        for s in wc_matches:
+            st.write(f"  {s}")
+
 if st.button("🔍 Zjisti ZEE tournament IDs z dnešního feedu"):
     import requests, time as _time
     _BASE = "https://1.flashscore.ninja/1/x/feed"
