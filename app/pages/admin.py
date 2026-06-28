@@ -174,6 +174,26 @@ else:
 
 st.divider()
 st.subheader("Debug: zápasy z Flashscore")
+if st.button("🔄 Vynutit refresh zápasů z Flashscore"):
+    from app.services.next_match_service import (
+        _fetch_all_from_api, _db_set, _CACHE_KEY_ALL,
+        get_all_ms_matches, get_next_matches, invalidate_match_cache,
+    )
+    invalidate_match_cache()
+    try:
+        raw = _fetch_all_from_api()
+        _db_set(_CACHE_KEY_ALL, raw)
+        st.success(f"Načteno {len(raw)} zápasů z Flashscore a uloženo do cache.")
+        team_count: dict[str, int] = {}
+        for m in raw:
+            for team in [m.get("home", ""), m.get("away", "")]:
+                if team:
+                    team_count[team] = team_count.get(team, 0) + 1
+        for t in ["Francie", "Argentina", "Švýcarsko", "Portugalsko", "Egypt"]:
+            st.write(f"  {t}: {team_count.get(t, 0)} zápasů")
+    except Exception as e:
+        st.error(f"Chyba: {e}")
+
 if st.button("🔍 Zjisti ZEE tournament IDs z dnešního feedu"):
     import requests, time as _time
     _BASE = "https://1.flashscore.ninja/1/x/feed"
