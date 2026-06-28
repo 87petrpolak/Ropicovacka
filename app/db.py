@@ -225,7 +225,7 @@ def _add_playoff_players(eng):
     db = SessionLocal()
     try:
         # Idempotentní — spustí se jen jednou
-        if db.get(AppCache, "playoff_draft_v1"):
+        if db.get(AppCache, "playoff_draft_v2"):
             return
 
         game = db.query(Game).filter(Game.is_active == True).first()
@@ -288,7 +288,7 @@ def _add_playoff_players(eng):
             existing_player_ids.add(player.id)
 
         cache_row = AppCache(
-            key="playoff_draft_v1",
+            key="playoff_draft_v2",
             value="done",
             updated_at=__import__("datetime").datetime.utcnow(),
         )
