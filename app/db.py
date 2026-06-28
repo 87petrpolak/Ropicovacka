@@ -219,87 +219,83 @@ _PLAYOFF_PICKS = [
 
 def _add_playoff_players(eng):
     """Přidá playoff posily (3 hráči na účastníka) do draft session před play-off MS 2026."""
+    from app.models.models import (
+        AppCache, FootballPlayer, Game, Participant, DraftSession, DraftPick
+    )
+    db = SessionLocal()
     try:
-        from app.models.models import (
-            FootballPlayer, Game, Participant, DraftSession, DraftPick
+        # Idempotentní — spustí se jen jednou
+        if db.get(AppCache, "playoff_draft_v1"):
+            return
+
+        game = db.query(Game).filter(Game.is_active == True).first()
+        if not game:
+            return
+
+        participants = {
+            p.name: p
+            for p in db.query(Participant).filter(Participant.game_id == game.id).all()
+        }
+        session = (
+            db.query(DraftSession)
+            .filter(DraftSession.game_id == game.id)
+            .order_by(DraftSession.id.desc())
+            .first()
         )
-        db = SessionLocal()
-        try:
-            # Idempotentní — spustí se jen jednou
-            from sqlalchemy import text as _text
-            done = db.execute(_text(
-                "SELECT value FROM app_cache WHERE key = 'playoff_draft_v1'"
-            )).fetchone()
-            if done:
-                return
+        if not session:
+            return
 
-            game = db.query(Game).filter(Game.is_active == True).first()
-            if not game:
-                return
+        existing_picks = db.query(DraftPick).filter(DraftPick.session_id == session.id).all()
+        max_pick = max((p.pick_number for p in existing_picks), default=0)
+        max_round = max((p.round_number for p in existing_picks), default=0)
+        existing_player_ids = {p.player_id for p in existing_picks}
 
-            participants = {
-                p.name: p
-                for p in db.query(Participant).filter(Participant.game_id == game.id).all()
-            }
-            session = (
-                db.query(DraftSession)
-                .filter(DraftSession.game_id == game.id)
-                .order_by(DraftSession.id.desc())
-                .first()
+        pick_num = max_pick
+        playoff_round = max_round + 1
+        for p_name, pl_name, country, position, club in _PLAYOFF_PICKS:
+            participant = next(
+                (p for name, p in participants.items() if name.lower() == p_name.lower()),
+                None,
             )
-            if not session:
-                return
+            if not participant:
+                continue
 
-            existing_picks = db.query(DraftPick).filter(DraftPick.session_id == session.id).all()
-            max_pick = max((p.pick_number for p in existing_picks), default=0)
-            max_round = max((p.round_number for p in existing_picks), default=0)
-            existing_player_ids = {p.player_id for p in existing_picks}
-
-            pick_num = max_pick
-            playoff_round = max_round + 1
-            for p_name, pl_name, country, position, club in _PLAYOFF_PICKS:
-                participant = next(
-                    (p for name, p in participants.items() if name.lower() == p_name.lower()),
-                    None,
+            player = db.query(FootballPlayer).filter(
+                FootballPlayer.name == pl_name,
+                FootballPlayer.club == club,
+            ).first()
+            if not player:
+                player = FootballPlayer(
+                    name=pl_name,
+                    country=country,
+                    position=position,
+                    club=club,
                 )
-                if not participant:
-                    continue
+                db.add(player)
+                db.flush()
 
-                # Najdi nebo vytvoř hráče (porovnání dle jména a týmu)
-                player = db.query(FootballPlayer).filter(
-                    FootballPlayer.name == pl_name,
-                    FootballPlayer.club == club,
-                ).first()
-                if not player:
-                    player = FootballPlayer(
-                        name=pl_name,
-                        country=country,
-                        position=position,
-                        club=club,
-                    )
-                    db.add(player)
-                    db.flush()
+            if player.id in existing_player_ids:
+                continue
 
-                if player.id in existing_player_ids:
-                    continue  # Hráč už je v draftu — přeskočit
-
-                pick_num += 1
-                db.add(DraftPick(
-                    session_id=session.id,
-                    participant_id=participant.id,
-                    player_id=player.id,
-                    pick_number=pick_num,
-                    round_number=playoff_round,
-                ))
-                existing_player_ids.add(player.id)
-
-            db.execute(_text(
-                "INSERT INTO app_cache (key, value, updated_at) VALUES "
-                "('playoff_draft_v1', 'done', NOW()) "
-                "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()"
+            pick_num += 1
+            db.add(DraftPick(
+                session_id=session.id,
+                participant_id=participant.id,
+                player_id=player.id,
+                pick_number=pick_num,
+                round_number=playoff_round,
             ))
-            db.commit()
-        finally:
-            db.close()
-    except Exception:
-        pass
+            existing_player_ids.add(player.id)
+
+        cache_row = AppCache(
+            key="playoff_draft_v1",
+            value="done",
+            updated_at=__import__("datetime").datetime.utcnow(),
+        )
+        db.add(cache_row)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[playoff_migration] CHYBA: {e}")
+    finally:
+        db.close()
