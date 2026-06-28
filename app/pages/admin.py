@@ -174,25 +174,36 @@ else:
 
 st.divider()
 st.subheader("Debug: zápasy z Flashscore")
-if st.button("🔍 Zobraz zápasy z Flashscore (debug)"):
-    from app.services.next_match_service import get_all_ms_matches
-    try:
-        matches = get_all_ms_matches()
-        st.write(f"Celkem zápasů: {len(matches)}")
-        team_count: dict[str, int] = {}
-        for m in matches:
-            for team in [m.get("home", ""), m.get("away", "")]:
-                if team:
-                    team_count[team] = team_count.get(team, 0) + 1
-        debug_teams = ["Francie", "Argentína", "Argentina", "Švýcarsko", "Portugalsko", "Egypt"]
-        for t in debug_teams:
-            cnt = team_count.get(t, 0)
-            st.write(f"  {t}: {cnt} zápasů")
-        with st.expander("Posledních 10 zápasů"):
-            for m in matches[-10:]:
-                st.write(m)
-    except Exception as e:
-        st.error(f"Chyba: {e}")
+if st.button("🔍 Zjisti ZEE tournament IDs z dnešního feedu"):
+    import requests, time as _time
+    _BASE = "https://1.flashscore.ninja/1/x/feed"
+    _HEADERS = {
+        "x-fsign": "SW9D1eZo",
+        "Referer": "https://www.livesport.cz/",
+        "User-Agent": "Mozilla/5.0",
+    }
+    zee_counts: dict[str, int] = {}
+    for day_off in [0, 1, 2, 3]:
+        try:
+            r = requests.get(f"{_BASE}/f_1_{day_off}_2_cs_1", headers=_HEADERS, timeout=10)
+            raw = r.text
+            cur_zee = ""
+            for block in raw.split("~"):
+                rec: dict[str, str] = {}
+                for pair in block.split("¬"):
+                    if "÷" in pair:
+                        k, _, v = pair.partition("÷")
+                        rec[k] = v
+                if "ZEE" in rec:
+                    cur_zee = rec["ZEE"]
+                if cur_zee and "AA" in rec and "AE" in rec:
+                    zee_counts[cur_zee] = zee_counts.get(cur_zee, 0) + 1
+            _time.sleep(0.2)
+        except Exception as ex:
+            st.warning(f"Day {day_off}: {ex}")
+    st.write("ZEE ID → počet zápasů (dnes + 3 dny):")
+    for zee, cnt in sorted(zee_counts.items(), key=lambda x: -x[1]):
+        st.write(f"  `{zee}` → {cnt} zápasů")
 
 st.divider()
 st.subheader("Playoff posily")
