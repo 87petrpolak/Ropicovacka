@@ -206,7 +206,7 @@ def _recompute_all_points(eng):
 # club = česky název národního týmu — musí odpovídat match.home_team / away_team
 _PLAYOFF_PICKS = [
     ("Péťa",   "Doué Désiré",        "", "FWD", "Francie"),
-    ("Péťa",   "Manzambi Johan",      "", "FWD", "Švýcarsko"),
+    ("Péťa",   "Manzambi Johan",      "", "MID", "Švýcarsko"),
     ("Péťa",   "Medina Facundo",      "", "DEF", "Argentina"),
     ("Chajda", "Ronaldo Cristiano",   "", "FWD", "Portugalsko"),
     ("Chajda", "Martínez Lisandro",   "", "DEF", "Argentina"),

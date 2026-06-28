@@ -221,9 +221,12 @@ if st.button("➕ Přidat playoff posily do kádru", type="primary"):
                     )
                     db.add(player)
                     db.flush()
-                elif player.club != club:
-                    # Sjednoť club na správný název týmu
-                    player.club = club
+                else:
+                    # Sjednoť club a pozici na správné hodnoty
+                    if player.club != club:
+                        player.club = club
+                    if player.position != position:
+                        player.position = position
 
                 if player.id in existing_player_ids:
                     skipped.append(f"{pl_name} — již v draftu")
