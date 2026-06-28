@@ -230,7 +230,7 @@ def get_next_matches() -> dict[str, dict]:
 
 
 def invalidate_match_cache() -> None:
-    """Smaže DB cache — zavolá se při manuálním refreshi dat."""
+    """Smaže DB cache i in-memory cache — zavolá se při manuálním refreshi dat."""
     try:
         from app.db import SessionLocal
         from app.models.models import AppCache
@@ -243,5 +243,12 @@ def invalidate_match_cache() -> None:
             db.commit()
         finally:
             db.close()
+    except Exception:
+        pass
+
+    # Vymaž i in-memory st.cache_data vrstvu
+    try:
+        get_all_ms_matches.clear()
+        get_next_matches.clear()
     except Exception:
         pass
