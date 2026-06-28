@@ -109,21 +109,43 @@ for pl in squad:
 # Soupeř pro vybrané kolo — Nth zápas každého týmu z MS kalendáře (cachováno)
 # Funguje i pro budoucí kola, která ještě nejsou v DB.
 def _build_round_match_map(round_number: int) -> dict[str, dict]:
+    from datetime import timezone as _tz
+    _GROUP_STAGE_END = datetime(2026, 6, 27, 23, 59, tzinfo=_tz.utc)
     try:
         all_matches = get_all_ms_matches()
     except Exception:
         return {}
-    team_count: dict[str, int] = {}
     result: dict[str, dict] = {}
-    for m in all_matches:  # seřazeno dle played_at
-        home, away = m.get("home", ""), m.get("away", "")
-        dt_str = (m.get("date_str", "") + " " + m.get("time_str", "")).strip()
-        for team, opp in [(home, away), (away, home)]:
-            if not team:
+    if round_number <= 3:
+        team_count: dict[str, int] = {}
+        for m in all_matches:
+            home, away = m.get("home", ""), m.get("away", "")
+            dt_str = (m.get("date_str", "") + " " + m.get("time_str", "")).strip()
+            for team, opp in [(home, away), (away, home)]:
+                if not team:
+                    continue
+                team_count[team] = team_count.get(team, 0) + 1
+                if team_count[team] == round_number:
+                    result[team] = {"opponent": opp, "date_str": dt_str}
+    else:
+        playoff_target = round_number - 3
+        playoff_count: dict[str, int] = {}
+        for m in all_matches:
+            pa = m.get("played_at")
+            if not pa:
                 continue
-            team_count[team] = team_count.get(team, 0) + 1
-            if team_count[team] == round_number:
-                result[team] = {"opponent": opp, "date_str": dt_str}
+            if pa.tzinfo is None:
+                pa = pa.replace(tzinfo=_tz.utc)
+            if pa <= _GROUP_STAGE_END:
+                continue
+            home, away = m.get("home", ""), m.get("away", "")
+            dt_str = (m.get("date_str", "") + " " + m.get("time_str", "")).strip()
+            for team, opp in [(home, away), (away, home)]:
+                if not team:
+                    continue
+                playoff_count[team] = playoff_count.get(team, 0) + 1
+                if playoff_count[team] == playoff_target:
+                    result[team] = {"opponent": opp, "date_str": dt_str}
     return result
 
 round_match_map = _build_round_match_map(selected_round.round_number)

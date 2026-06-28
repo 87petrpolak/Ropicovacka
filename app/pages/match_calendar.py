@@ -98,7 +98,7 @@ if not team_to_players:
     st.stop()
 
 # ----------------------------------------------------------------
-# Vyber zápasy pro dané kolo — Nth zápas každého týmu
+# Vyber zápasy pro dané kolo — Nth zápas (skupiny) nebo Nth playoff zápas
 # ----------------------------------------------------------------
 try:
     all_matches = get_all_ms_matches()
@@ -108,17 +108,41 @@ except Exception:
 nominated_teams = set(team_to_players.keys())
 round_number = selected_round.round_number
 
-team_count: dict[str, int] = {}
+# Skupinová fáze MS 2026 skončila 27. 6. 2026 — playoff zápasy jsou po tomto datu
+_GROUP_STAGE_END = datetime(2026, 6, 27, 23, 59, tzinfo=timezone.utc)
+
 match_for_team: dict[str, dict] = {}
 
-for m in all_matches:  # seřazeno dle played_at
-    home, away = m.get("home", ""), m.get("away", "")
-    for team, opp in [(home, away), (away, home)]:
-        if not team:
+if round_number <= 3:
+    # Skupiny: Nth zápas každého týmu (pořadí dle data)
+    team_count: dict[str, int] = {}
+    for m in all_matches:
+        home, away = m.get("home", ""), m.get("away", "")
+        for team, opp in [(home, away), (away, home)]:
+            if not team:
+                continue
+            team_count[team] = team_count.get(team, 0) + 1
+            if team_count[team] == round_number:
+                match_for_team[team] = m
+else:
+    # Playoff: (round_number - 3)th zápas PO skončení skupinové fáze
+    playoff_target = round_number - 3
+    playoff_count: dict[str, int] = {}
+    for m in all_matches:
+        pa = m.get("played_at")
+        if not pa:
             continue
-        team_count[team] = team_count.get(team, 0) + 1
-        if team_count[team] == round_number:
-            match_for_team[team] = m
+        if pa.tzinfo is None:
+            pa = pa.replace(tzinfo=timezone.utc)
+        if pa <= _GROUP_STAGE_END:
+            continue
+        home, away = m.get("home", ""), m.get("away", "")
+        for team, opp in [(home, away), (away, home)]:
+            if not team:
+                continue
+            playoff_count[team] = playoff_count.get(team, 0) + 1
+            if playoff_count[team] == playoff_target:
+                match_for_team[team] = m
 
 seen_ids: set[str] = set()
 relevant: list[dict] = []
