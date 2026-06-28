@@ -122,15 +122,24 @@ for m in all_matches:  # seřazeno dle played_at
 
 seen_ids: set[str] = set()
 relevant: list[dict] = []
+missing_teams: list[str] = []
 for team in nominated_teams:
     m = match_for_team.get(team)
     if m and m.get("match_id") not in seen_ids:
         seen_ids.add(m["match_id"])
         relevant.append(m)
+    elif not m:
+        missing_teams.append(team)
 
 if not relevant:
     st.info("Žádné zápasy pro nominované týmy nenalezeny. Data se načítají z Flashscore.")
     st.stop()
+
+if missing_teams:
+    st.warning(
+        f"Zápas pro toto kolo zatím nenalezen: **{', '.join(sorted(missing_teams))}**. "
+        "Data se průběžně načítají z Flashscore (cache 2 h)."
+    )
 
 relevant.sort(key=lambda x: x.get("played_at") or datetime.max.replace(tzinfo=timezone.utc))
 
@@ -151,7 +160,7 @@ FLAGS: dict[str, str] = {
     "Kapverdy": "🇨🇻", "Curacao": "🇨🇼", "DR Kongo": "🇨🇩", "Alžírsko": "🇩🇿",
     "Jihoafrická republika": "🇿🇦", "Katar": "🇶🇦", "Panama": "🇵🇦",
     "Bosna a Hercegovina": "🇧🇦", "Haiti": "🇭🇹", "Skotsko": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
-    "Česko": "🇨🇿", "Švédsko": "🇸🇪", "Švédsko": "🇸🇪",
+    "Česko": "🇨🇿", "Švédsko": "🇸🇪", "Egypt": "🇪🇬", "Nový Zéland": "🇳🇿",
 }
 
 def flag(team: str) -> str:
