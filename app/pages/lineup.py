@@ -109,8 +109,6 @@ for pl in squad:
 # Soupeř pro vybrané kolo — Nth zápas každého týmu z MS kalendáře (cachováno)
 # Funguje i pro budoucí kola, která ještě nejsou v DB.
 def _build_round_match_map(round_number: int) -> dict[str, dict]:
-    from datetime import timezone as _tz
-    _GROUP_STAGE_END = datetime(2026, 6, 27, 23, 59, tzinfo=_tz.utc)
     try:
         all_matches = get_all_ms_matches()
     except Exception:
@@ -119,6 +117,8 @@ def _build_round_match_map(round_number: int) -> dict[str, dict]:
     if round_number <= 3:
         team_count: dict[str, int] = {}
         for m in all_matches:
+            if m.get("is_playoff"):
+                continue
             home, away = m.get("home", ""), m.get("away", "")
             dt_str = (m.get("date_str", "") + " " + m.get("time_str", "")).strip()
             for team, opp in [(home, away), (away, home)]:
@@ -131,12 +131,7 @@ def _build_round_match_map(round_number: int) -> dict[str, dict]:
         playoff_target = round_number - 3
         playoff_count: dict[str, int] = {}
         for m in all_matches:
-            pa = m.get("played_at")
-            if not pa:
-                continue
-            if pa.tzinfo is None:
-                pa = pa.replace(tzinfo=_tz.utc)
-            if pa <= _GROUP_STAGE_END:
+            if not m.get("is_playoff"):
                 continue
             home, away = m.get("home", ""), m.get("away", "")
             dt_str = (m.get("date_str", "") + " " + m.get("time_str", "")).strip()

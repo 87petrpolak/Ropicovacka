@@ -112,10 +112,13 @@ def _fetch_all_from_api() -> list[dict]:
             raw = _fetch(f"f_1_{day_offset}_2_cs_1")
             records = _parse(raw)
             in_wc = False
+            section_is_playoff = False
 
             for rec in records:
                 if "ZEE" in rec:
                     in_wc = rec.get("ZEE") == WC_TOURNAMENT_ID
+                    # Flashscore rozlišuje skupiny ("Mistrovství světa") a play-off ("- Play Off")
+                    section_is_playoff = "Play Off" in rec.get("ZA", "")
                     continue
                 if not in_wc or "AA" not in rec or "AE" not in rec:
                     continue
@@ -146,6 +149,7 @@ def _fetch_all_from_api() -> list[dict]:
                     "date_str": date_str,
                     "time_str": time_str,
                     "status": rec.get("AB", "1"),
+                    "is_playoff": section_is_playoff,
                 })
 
             time.sleep(0.1)

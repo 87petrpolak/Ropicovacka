@@ -108,15 +108,14 @@ except Exception:
 nominated_teams = set(team_to_players.keys())
 round_number = selected_round.round_number
 
-# Skupinová fáze MS 2026 skončila 27. 6. 2026 — playoff zápasy jsou po tomto datu
-_GROUP_STAGE_END = datetime(2026, 6, 27, 23, 59, tzinfo=timezone.utc)
-
 match_for_team: dict[str, dict] = {}
 
 if round_number <= 3:
-    # Skupiny: Nth zápas každého týmu (pořadí dle data)
+    # Skupiny: Nth skupinový zápas každého týmu (pořadí dle data)
     team_count: dict[str, int] = {}
     for m in all_matches:
+        if m.get("is_playoff"):
+            continue
         home, away = m.get("home", ""), m.get("away", "")
         for team, opp in [(home, away), (away, home)]:
             if not team:
@@ -125,16 +124,11 @@ if round_number <= 3:
             if team_count[team] == round_number:
                 match_for_team[team] = m
 else:
-    # Playoff: (round_number - 3)th zápas PO skončení skupinové fáze
+    # Playoff: (round_number - 3)th playoff zápas každého týmu
     playoff_target = round_number - 3
     playoff_count: dict[str, int] = {}
     for m in all_matches:
-        pa = m.get("played_at")
-        if not pa:
-            continue
-        if pa.tzinfo is None:
-            pa = pa.replace(tzinfo=timezone.utc)
-        if pa <= _GROUP_STAGE_END:
+        if not m.get("is_playoff"):
             continue
         home, away = m.get("home", ""), m.get("away", "")
         for team, opp in [(home, away), (away, home)]:
@@ -266,16 +260,39 @@ def render_match(m: dict, dimmed: bool = False) -> None:
     st.divider()
 
 
+def _day_label(m: dict) -> str:
+    pa = m.get("played_at")
+    if not pa:
+        return m.get("date_str", "")
+    if pa.tzinfo is None:
+        pa = pa.replace(tzinfo=timezone.utc)
+    dt = pa.astimezone(PRAGUE_TZ)
+    return f"{CZ_DAYS[dt.weekday()]} {dt.strftime('%-d.%-m.')}"
+
+
+def _render_section(matches: list[dict], dimmed: bool) -> None:
+    last_day = None
+    for m in matches:
+        day = _day_label(m)
+        if day != last_day:
+            st.markdown(
+                f"<div style='font-size:0.85rem;font-weight:600;color:gray;"
+                f"margin:12px 0 4px 0;text-transform:uppercase;letter-spacing:.05em'>"
+                f"── {day} ──</div>",
+                unsafe_allow_html=True,
+            )
+            last_day = day
+        render_match(m, dimmed=dimmed)
+
+
 # Odehrané zápasy (ztlumené)
-for m in relevant[:split_idx]:
-    render_match(m, dimmed=True)
+_render_section(relevant[:split_idx], dimmed=True)
 
 # Marker pro auto-scroll
 st.markdown('<div id="calendar-now"></div>', unsafe_allow_html=True)
 
 # Nadcházející zápasy
-for m in relevant[split_idx:]:
-    render_match(m, dimmed=False)
+_render_section(relevant[split_idx:], dimmed=False)
 
 # Auto-scroll na první nadcházející zápas (jen pokud existují odehrané)
 if split_idx > 0:
