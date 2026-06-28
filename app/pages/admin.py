@@ -179,8 +179,16 @@ if st.button("➕ Přidat playoff posily do kádru", type="primary"):
     try:
         from app.models.models import FootballPlayer, DraftSession, DraftPick
         from app.db import _PLAYOFF_PICKS
+        from sqlalchemy import text as _sql
 
         db.rollback()  # vyčisti případný chybový stav session
+
+        # Obnov sekvenci na správnou hodnotu (mohla se rozjet po částečném rollbacku)
+        db.execute(_sql(
+            "SELECT setval(pg_get_serial_sequence('football_players', 'id'), "
+            "COALESCE((SELECT MAX(id) FROM football_players), 0) + 1, false)"
+        ))
+        db.commit()
 
         session = db.query(DraftSession).filter(
             DraftSession.game_id == game_id
