@@ -191,6 +191,11 @@ if st.button("🔄 Vynutit refresh zápasů z Flashscore"):
                     team_count[team] = team_count.get(team, 0) + 1
         for t in ["Francie", "Argentina", "Švýcarsko", "Portugalsko", "Egypt"]:
             st.write(f"  {t}: {team_count.get(t, 0)} zápasů")
+        # Detail pro Portugalsko
+        pt_matches = [m for m in raw if "Portugalsko" in (m.get("home",""), m.get("away",""))]
+        st.write(f"**Všechny Portugalsko zápasy ({len(pt_matches)}):**")
+        for m in pt_matches:
+            st.write(f"  {m.get('date_str','')} {m.get('home','')} vs {m.get('away','')} (status={m.get('status','')})")
     except Exception as e:
         st.error(f"Chyba: {e}")
 
