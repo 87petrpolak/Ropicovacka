@@ -105,7 +105,9 @@ def _fetch_all_from_api() -> list[dict]:
     all_matches = []
     seen_ids: set[str] = set()
 
-    for day_offset in range(-14, 35):  # -14 = odehrané zápasy skupinové fáze
+    # Nejdřív budoucí + dnešní (kritické), pak historie — aby rate-limit nevyřadil aktuální data
+    day_offsets = list(range(0, 35)) + list(range(-1, -15, -1))
+    for day_offset in day_offsets:
         try:
             raw = _fetch(f"f_1_{day_offset}_2_cs_1")
             records = _parse(raw)
