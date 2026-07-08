@@ -259,15 +259,17 @@ st.subheader("Oprava stats (Romero + Díaz Luis)")
 from app.models.models import AppCache as _AC
 ext_done = db.get(_AC, "playoff_fix_ext_id_v1")
 stats_done = db.get(_AC, "playoff_fix_stats_v1")
-if ext_done and stats_done:
-    st.success("✅ Oprava proběhla úspěšně (external_id + stats).")
-elif ext_done:
-    st.warning("⚠️ External_id nastaveno, ale stats ještě nenačteny ze Flashscore. Zkusíme znovu při příštím startu, nebo klikni níže.")
+diaz_done = db.get(_AC, "playoff_fix_diaz_v1")
+all_fixed = bool(ext_done and stats_done and diaz_done)
+if all_fixed:
+    st.success("✅ Romero external_id ✅ Argentina vs Egypt stats ✅ Díaz Luis false gól opraven")
 else:
-    st.error("❌ Oprava ještě neproběhla.")
-if not (ext_done and stats_done):
+    st.write(f"A (Romero ext_id): {'✅' if ext_done else '❌'}  "
+             f"B (ARG vs EGY stats): {'✅' if stats_done else '❌'}  "
+             f"C (Díaz Luis false gól): {'✅' if diaz_done else '❌'}")
+if not all_fixed:
     if st.button("▶️ Spustit opravu teď", type="primary"):
-        from app.models.models import FootballPlayer as _FP, Match as _M, AppCache as _AC2
+        from app.models.models import FootballPlayer as _FP, Match as _M, AppCache as _AC2, PlayerMatchStats as _PMS
         from app.providers.livesport_provider import LivesportProvider as _LSP
         from app.services.data_refresh import _upsert_stats, _recompute_match_points
         from app.providers.base import RefreshResult as _RR
@@ -282,7 +284,6 @@ if not (ext_done and stats_done):
                 st.error("Romero Cristian nenalezen v DB!")
             elif duplicate and duplicate.id != romero.id:
                 st.write(f"Duplikát nalezen: '{duplicate.name}' (id={duplicate.id}) → přesouvám stats na Romero Cristian (id={romero.id})")
-                from app.models.models import PlayerMatchStats as _PMS
                 dup_stats = db.query(_PMS).filter(_PMS.player_id == duplicate.id).all()
                 for s in dup_stats:
                     exists = db.query(_PMS).filter(
@@ -297,7 +298,7 @@ if not (ext_done and stats_done):
                 db.delete(duplicate)
                 db.flush()
                 romero.external_id = "jBZTWXMn"
-                st.write(f"→ Duplikát smazán, external_id přiřazen Romerovi")
+                st.write("→ Duplikát smazán, external_id přiřazen Romerovi")
             elif not romero.external_id:
                 romero.external_id = "jBZTWXMn"
                 st.write("→ external_id nastaven")
@@ -312,22 +313,17 @@ if not (ext_done and stats_done):
             db.rollback()
             st.error(f"Krok A selhal: {e}")
 
-        # Krok B: fetch stats ze Flashscore
-        provider = _LSP()
-        all_ok = True
-        for label, teams in [
-            ("Argentina vs Egypt", [("Argentina", "Egypt"), ("Egypt", "Argentina")]),
-            ("Švýcarsko vs Kolumbie", [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]),
-        ]:
-            found = False
-            for home, away in teams:
+        # Krok B: fetch stats ze Flashscore (Argentina vs Egypt)
+        if not db.get(_AC2, "playoff_fix_stats_v1"):
+            provider = _LSP()
+            b_ok = True
+            for home, away in [("Argentina", "Egypt"), ("Egypt", "Argentina")]:
                 m = db.query(_M).filter(
                     _M.home_team == home, _M.away_team == away,
                     _M.game_id == game_id, _M.external_id.isnot(None),
                 ).first()
                 if m:
-                    found = True
-                    st.write(f"**{label}**: match_id={m.external_id}")
+                    st.write(f"**Argentina vs Egypt**: match_id={m.external_id}")
                     try:
                         stats_data = provider.fetch_player_stats(m.external_id)
                         st.write(f"  → Flashscore vrátil {len(stats_data)} hráčů")
@@ -340,17 +336,82 @@ if not (ext_done and stats_done):
                     except Exception as e:
                         db.rollback()
                         st.error(f"  ❌ {e}")
-                        all_ok = False
+                        b_ok = False
                     break
-            if not found:
-                st.warning(f"{label}: zápas nenalezen v DB (chybí external_id)")
+            else:
+                st.warning("Argentina vs Egypt: zápas nenalezen v DB (chybí external_id)")
+                b_ok = False
+            if b_ok:
+                try:
+                    db.add(_AC2(key="playoff_fix_stats_v1", value="done", updated_at=_dt.utcnow()))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        else:
+            st.write("Krok B: již hotovo")
 
-        if all_ok and not db.get(_AC2, "playoff_fix_stats_v1"):
+        # Krok C: oprav false góly (Díaz Luis + kdokoli else kde tým neskóroval)
+        if not db.get(_AC2, "playoff_fix_diaz_v1"):
+            st.write("**Krok C**: hledám false góly...")
+            fixed_match_ids: set[int] = set()
+            all_stats_goals = db.query(_PMS).filter(_PMS.goals > 0).all()
+            for stat in all_stats_goals:
+                player = db.get(_FP, stat.player_id)
+                match = db.get(_M, stat.match_id)
+                if not player or not match or not player.club:
+                    continue
+                club = player.club
+                if match.home_team == club:
+                    club_goals = match.home_score or 0
+                elif match.away_team == club:
+                    club_goals = match.away_score or 0
+                else:
+                    continue
+                if club_goals > 0:
+                    continue
+                # Tým neskóroval — oprav gól
+                old_goals = stat.goals
+                corrected = False
+                if match.external_id:
+                    try:
+                        prov_c = _LSP()
+                        fs_data = prov_c.fetch_player_stats(match.external_id)
+                        for sd in fs_data:
+                            if (sd.player_external_id and sd.player_external_id == player.external_id) or \
+                               sd.player_name == player.name:
+                                stat.goals = sd.goals
+                                stat.assists = sd.assists
+                                corrected = True
+                                break
+                        if not corrected:
+                            stat.goals = 0
+                            corrected = True
+                    except Exception as e_c:
+                        st.warning(f"Flashscore fetch selhal pro {player.name}: {e_c} → nastavuji 0")
+                        stat.goals = 0
+                        corrected = True
+                else:
+                    stat.goals = 0
+                    corrected = True
+                if corrected:
+                    fixed_match_ids.add(match.id)
+                    st.write(f"  {player.name} ({club}): goals {old_goals}→{stat.goals} "
+                             f"v {match.home_team} {match.home_score}-{match.away_score} {match.away_team}"
+                             f" (ext_id: {match.external_id or 'chybí'})")
+            for mid in fixed_match_ids:
+                m = db.get(_M, mid)
+                if m:
+                    _recompute_match_points(db, m, game_id)
             try:
-                db.add(_AC2(key="playoff_fix_stats_v1", value="done", updated_at=_dt.utcnow()))
+                db.add(_AC2(key="playoff_fix_diaz_v1", value="done", updated_at=_dt.utcnow()))
                 db.commit()
-            except Exception:
+                st.success(f"✅ Krok C hotov ({len(fixed_match_ids)} zápasů opraveno)")
+            except Exception as e_c2:
                 db.rollback()
+                st.error(f"Krok C selhal při commitu: {e_c2}")
+        else:
+            st.write("Krok C: již hotovo")
+
         st.rerun()
 
 st.divider()

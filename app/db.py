@@ -222,12 +222,12 @@ _PLAYOFF_PICKS = [
 
 def _fix_playoff_stats(eng):
     """
-    Oprava stats ve dvou oddělených krocích:
-    Krok A (vždy bezpečný, jen DB): nastav Romero external_id aby ho budoucí importy našly.
-    Krok B (vyžaduje Flashscore): re-fetchni stats pro oba zápasy.
-    Každý krok má vlastní cache klíč — pokud B selže, A zůstane a B se zkusí znovu.
+    Oprava stats ve třech oddělených krocích:
+    Krok A (jen DB): nastav Romero external_id aby ho budoucí importy našly.
+    Krok B (Flashscore): re-fetchni stats pro Argentina vs Egypt.
+    Krok C (odvozeno ze skóre): oprav false góly hráčů v zápasech kde jejich tým neskóroval.
     """
-    from app.models.models import AppCache, FootballPlayer, Game, Match
+    from app.models.models import AppCache, FootballPlayer, PlayerMatchStats, Game, Match
     db = SessionLocal()
     try:
         game = db.query(Game).filter(Game.is_active == True).first()
@@ -248,62 +248,114 @@ def _fix_playoff_stats(eng):
             ))
             db.commit()
 
-        # === Krok B: re-fetchni stats ze Flashscore ===
-        if db.get(AppCache, "playoff_fix_stats_v1"):
-            return
+        # === Krok B: re-fetchni stats ze Flashscore (Argentina vs Egypt) ===
+        if not db.get(AppCache, "playoff_fix_stats_v1"):
+            from app.providers.livesport_provider import LivesportProvider
+            from app.services.data_refresh import _upsert_stats, _recompute_match_points
+            from app.providers.base import RefreshResult
 
-        from app.providers.livesport_provider import LivesportProvider
-        from app.services.data_refresh import _upsert_stats, _recompute_match_points
-        from app.providers.base import RefreshResult
+            provider = LivesportProvider()
+            errors = []
 
-        provider = LivesportProvider()
-        errors = []
+            for home, away in [("Argentina", "Egypt"), ("Egypt", "Argentina")]:
+                m = db.query(Match).filter(
+                    Match.home_team == home, Match.away_team == away,
+                    Match.game_id == game.id, Match.external_id.isnot(None),
+                ).first()
+                if m:
+                    try:
+                        r = RefreshResult()
+                        for sd in provider.fetch_player_stats(m.external_id):
+                            _upsert_stats(db, sd, m, r)
+                        _recompute_match_points(db, m, game.id)
+                        db.flush()
+                        print(f"[playoff_fix] {home} vs {away}: +{r.stats_added} ↺{r.stats_updated}")
+                    except Exception as e:
+                        errors.append(f"Argentina vs Egypt: {e}")
+                    break
 
-        # Argentina vs Egypt — Romero Cristian (chybějící stats)
-        for home, away in [("Argentina", "Egypt"), ("Egypt", "Argentina")]:
-            m = db.query(Match).filter(
-                Match.home_team == home, Match.away_team == away,
-                Match.game_id == game.id, Match.external_id.isnot(None),
-            ).first()
-            if m:
-                try:
-                    r = RefreshResult()
-                    for sd in provider.fetch_player_stats(m.external_id):
-                        _upsert_stats(db, sd, m, r)
+            if not errors:
+                db.add(AppCache(
+                    key="playoff_fix_stats_v1",
+                    value="done",
+                    updated_at=__import__("datetime").datetime.utcnow(),
+                ))
+            db.commit()
+            if errors:
+                print(f"[playoff_fix] Chyby Krok B: {errors}")
+
+        # === Krok C: oprav false góly — odvozeno ze skóre zápasu ===
+        # Hledáme hráče jejichž tým v daném zápase neskóroval, ale player má goals > 0.
+        # To je fyzicky nemožné — gól musí být false positive z parsování.
+        # Pokud zápas má external_id, zkusíme Flashscore; jinak nastavíme 0 ze skóre.
+        if not db.get(AppCache, "playoff_fix_diaz_v1"):
+            from app.services.data_refresh import _recompute_match_points
+
+            fixed_match_ids: set[int] = set()
+
+            all_stats_with_goals = db.query(PlayerMatchStats).filter(
+                PlayerMatchStats.goals > 0
+            ).all()
+
+            for stat in all_stats_with_goals:
+                player = db.get(FootballPlayer, stat.player_id)
+                match = db.get(Match, stat.match_id)
+                if not player or not match or not player.club:
+                    continue
+
+                club = player.club
+                if match.home_team == club:
+                    club_goals = match.home_score or 0
+                elif match.away_team == club:
+                    club_goals = match.away_score or 0
+                else:
+                    continue  # hráčův klub nehrál v tomto zápase
+
+                if club_goals > 0:
+                    continue  # tým skóroval, gól může být validní
+
+                # Tým neskóroval 0 — gól je false positive
+                corrected = False
+                if match.external_id:
+                    try:
+                        from app.providers.livesport_provider import LivesportProvider
+                        prov = LivesportProvider()
+                        for sd in prov.fetch_player_stats(match.external_id):
+                            pid_match = (sd.player_external_id and
+                                         sd.player_external_id == player.external_id)
+                            name_match = sd.player_name == player.name
+                            if pid_match or name_match:
+                                stat.goals = sd.goals
+                                stat.assists = sd.assists
+                                corrected = True
+                                break
+                        if not corrected:
+                            stat.goals = 0
+                            corrected = True
+                    except Exception as e:
+                        print(f"[playoff_fix C] Flashscore fetch selhal ({player.name}): {e}")
+                        stat.goals = 0
+                        corrected = True
+                else:
+                    stat.goals = 0
+                    corrected = True
+
+                if corrected:
+                    fixed_match_ids.add(match.id)
+                    print(f"[playoff_fix C] {player.name}: goals opraveny v {match.home_team} vs {match.away_team}")
+
+            for mid in fixed_match_ids:
+                m = db.get(Match, mid)
+                if m:
                     _recompute_match_points(db, m, game.id)
-                    db.flush()
-                    print(f"[playoff_fix] {home} vs {away}: +{r.stats_added} ↺{r.stats_updated}")
-                except Exception as e:
-                    errors.append(f"Argentina vs Egypt: {e}")
-                break
 
-        # Švýcarsko vs Kolumbie — Díaz Luis (false gól)
-        for home, away in [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]:
-            m = db.query(Match).filter(
-                Match.home_team == home, Match.away_team == away,
-                Match.game_id == game.id, Match.external_id.isnot(None),
-            ).first()
-            if m:
-                try:
-                    r = RefreshResult()
-                    for sd in provider.fetch_player_stats(m.external_id):
-                        _upsert_stats(db, sd, m, r)
-                    _recompute_match_points(db, m, game.id)
-                    db.flush()
-                    print(f"[playoff_fix] {home} vs {away}: +{r.stats_added} ↺{r.stats_updated}")
-                except Exception as e:
-                    errors.append(f"Švýcarsko vs Kolumbie: {e}")
-                break
-
-        if not errors:
             db.add(AppCache(
-                key="playoff_fix_stats_v1",
+                key="playoff_fix_diaz_v1",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))
-        db.commit()
-        if errors:
-            print(f"[playoff_fix] Chyby (zkusíme znovu): {errors}")
+            db.commit()
+
     except Exception as e:
         db.rollback()
         print(f"[playoff_fix] Kritická chyba: {e}")
