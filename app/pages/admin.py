@@ -255,67 +255,117 @@ if st.button("🔍 Zjisti ZEE tournament IDs z dnešního feedu"):
         st.write(f"  `{zee}` → {cnt} zápasů")
 
 st.divider()
-st.subheader("Re-import stats zápasů")
+st.subheader("Debug & import stats konkrétního zápasu")
 st.caption(
-    "Znovu načte hráčské statistiky ze Flashscore pro všechny odehrané zápasy. "
-    "Použij pokud hráč chybí v přehledu bodů — např. byl přidán do draftu až po odehrání zápasu."
+    "Načte hráče ze Flashscore pro vybraný zápas a ukáže, kdo byl nalezen v draftu. "
+    "INSERT-only: existující záznamy nepřepisuje."
 )
-if st.button("🔄 Re-importovat stats ze Flashscore", type="secondary"):
-    try:
-        from app.models.models import Match as _Match
-        from app.providers.livesport_provider import LivesportProvider
-        from app.services.data_refresh import _upsert_stats, _recompute_match_points
-        from app.providers.base import RefreshResult as _RefreshResult
 
-        finished = (
-            db.query(_Match)
-            .filter(
-                _Match.game_id == game_id,
-                _Match.is_finished == True,
-                _Match.external_id.isnot(None),
-            )
-            .order_by(_Match.played_at)
-            .all()
-        )
+try:
+    from app.models.models import Match as _Match, FootballPlayer as _FP, PlayerMatchStats as _PMS
+    finished_matches = (
+        db.query(_Match)
+        .filter(_Match.game_id == game_id, _Match.is_finished == True, _Match.external_id.isnot(None))
+        .order_by(_Match.played_at)
+        .all()
+    )
+    if finished_matches:
+        match_opts = {f"{m.home_team or '?'} vs {m.away_team or '?'} ({m.external_id})": m for m in finished_matches}
+        sel_match_label = st.selectbox("Zápas", list(match_opts.keys()), key="debug_match_sel")
+        sel_match = match_opts[sel_match_label]
 
-        if not finished:
-            st.warning("Žádné odehrané zápasy s external_id v DB.")
-        else:
-            provider = LivesportProvider()
-            total_added = total_updated = 0
-            errs = []
-            for m in finished:
-                try:
-                    stats_data = provider.fetch_player_stats(m.external_id)
-                    r = _RefreshResult()
-                    unmatched = []
-                    for sd in stats_data:
-                        pl = None
-                        if sd.player_external_id:
-                            from app.models.models import FootballPlayer as _FP
-                            pl = db.query(_FP).filter(_FP.external_id == sd.player_external_id).first()
-                        if pl is None:
-                            from app.models.models import FootballPlayer as _FP
-                            pl = db.query(_FP).filter(_FP.name == sd.player_name).first()
-                        if pl is None:
-                            unmatched.append(sd.player_name)
-                        _upsert_stats(db, sd, m, r)
-                    _recompute_match_points(db, m, game_id)
-                    total_added += r.stats_added
-                    total_updated += r.stats_updated
-                    label = f"{m.home_team or '?'} vs {m.away_team or '?'}"
-                    st.write(f"✅ **{label}**: +{r.stats_added} přidáno / ↺{r.stats_updated} aktualizováno")
-                    if unmatched:
-                        st.caption(f"   ⚠️ Nenalezeni v draftu: {', '.join(unmatched)}")
-                except Exception as em:
-                    errs.append(f"{m.external_id}: {em}")
-            db.commit()
-            st.success(f"Hotovo — celkem přidáno {total_added}, aktualizováno {total_updated} stats")
-            if errs:
-                st.warning("Chyby:\n" + "\n".join(f"- {e}" for e in errs))
-    except Exception as e:
-        db.rollback()
-        st.error(f"Chyba: {e}")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            do_debug = st.button("🔍 Zobrazit hráče z Flashscore", key="debug_match_btn")
+        with col_b:
+            do_import = st.button("➕ Doplnit chybějící stats", key="import_match_btn", type="primary")
+        with col_c:
+            do_overwrite = st.button("🔧 Přepsat stats (opravit chyby)", key="overwrite_match_btn", type="secondary")
+
+        if do_debug or do_import or do_overwrite:
+            try:
+                from app.providers.livesport_provider import LivesportProvider
+                provider = LivesportProvider()
+                stats_data = provider.fetch_player_stats(sel_match.external_id)
+                st.write(f"Flashscore vrátil **{len(stats_data)} hráčů**:")
+                added_count = 0
+                for sd in stats_data:
+                    pl = None
+                    if sd.player_external_id:
+                        pl = db.query(_FP).filter(_FP.external_id == sd.player_external_id).first()
+                    if pl is None:
+                        pl = db.query(_FP).filter(_FP.name == sd.player_name).first()
+
+                    already = pl and db.query(_PMS).filter(
+                        _PMS.match_id == sel_match.id, _PMS.player_id == pl.id
+                    ).first()
+
+                    if pl:
+                        status = "✅ v draftu"
+                        if already:
+                            status += " (stats již existují)"
+                        else:
+                            status += " — CHYBÍ stats"
+                    else:
+                        status = "⚪ není v draftu"
+
+                    g = sd.goals or 0
+                    a = sd.assists or 0
+                    w = "✓" if sd.team_won else "✗"
+                    cs = "✓" if sd.clean_sheet else "✗"
+                    st.write(
+                        f"  **{sd.player_name}** — G:{g} A:{a} výhra:{w} čisté:{cs} | {status}"
+                    )
+
+                    if do_import and pl and not already:
+                        db.add(_PMS(
+                            match_id=sel_match.id,
+                            player_id=pl.id,
+                            goals=sd.goals,
+                            assists=sd.assists,
+                            played=sd.played,
+                            minutes_played=sd.minutes_played,
+                            team_won=sd.team_won,
+                            clean_sheet=sd.clean_sheet,
+                        ))
+                        added_count += 1
+                    elif do_overwrite and pl:
+                        if already:
+                            already.goals = sd.goals
+                            already.assists = sd.assists
+                            already.played = sd.played
+                            already.minutes_played = sd.minutes_played
+                            already.team_won = sd.team_won
+                            already.clean_sheet = sd.clean_sheet
+                        else:
+                            db.add(_PMS(
+                                match_id=sel_match.id,
+                                player_id=pl.id,
+                                goals=sd.goals,
+                                assists=sd.assists,
+                                played=sd.played,
+                                minutes_played=sd.minutes_played,
+                                team_won=sd.team_won,
+                                clean_sheet=sd.clean_sheet,
+                            ))
+                        added_count += 1
+
+                if do_import or do_overwrite:
+                    if added_count:
+                        from app.services.data_refresh import _recompute_match_points
+                        _recompute_match_points(db, sel_match, game_id)
+                        db.commit()
+                        action = "Přepsáno" if do_overwrite else "Přidáno"
+                        st.success(f"{action} {added_count} stats.")
+                    else:
+                        st.info("Nic k doplnění." if do_import else "Nic ke změně.")
+            except Exception as e_d:
+                db.rollback()
+                st.error(f"Chyba: {e_d}")
+    else:
+        st.info("Žádné odehrané zápasy s external_id v DB.")
+except Exception as e_outer:
+    st.error(f"Chyba při načítání zápasů: {e_outer}")
 
 st.divider()
 st.subheader("Playoff posily")
