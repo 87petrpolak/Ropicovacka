@@ -222,82 +222,61 @@ _PLAYOFF_PICKS = [
 
 def _fix_playoff_stats(eng):
     """
-    Jednorázová oprava stats po chybném re-importu z Flashscore:
-    1. Díaz Luis (Kolumbie) — false gól odstraněn (Kolumbie prohrala 0:1, žádný gól nedala)
-    2. Romero Cristian (Argentina) — chybějící stats doplněny (byl v draftu až po zápase)
+    Oprava stats problémů — bez hardcodingu, data vždy ze Flashscore:
+    1. Romero Cristian — chybí stats (Flashscore ho má jako "Romero C.", ext_id: jBZTWXMn).
+       Nastavíme external_id a pak standardní import ho najde a správně importuje.
+    2. Díaz Luis — false gól z chybného re-importu. Re-fetchneme z Flashscore a přepíšeme.
     """
-    from app.models.models import AppCache, FootballPlayer, Game, Match, PlayerMatchStats, PointsRule, Position
-    from app.services.scoring import compute_points, rules_from_db
+    from app.models.models import AppCache, FootballPlayer, Game, Match
+    from app.providers.livesport_provider import LivesportProvider
+    from app.services.data_refresh import _upsert_stats, _recompute_match_points
+    from app.providers.base import RefreshResult
     db = SessionLocal()
     try:
-        if db.get(AppCache, "playoff_stats_fix_v1"):
+        if db.get(AppCache, "playoff_stats_fix_v3"):
             return
 
         game = db.query(Game).filter(Game.is_active == True).first()
         if not game:
             return
 
-        scoring_rules = rules_from_db(
-            db.query(PointsRule).filter(PointsRule.game_id == game.id).all()
-        )
+        provider = LivesportProvider()
 
-        def _recompute(stats, player):
-            bd = compute_points(stats, Position(player.position), scoring_rules)
-            stats.computed_points = bd.total
-
-        # 1. Díaz Luis — oprav false gól (Kolumbie 0 gólů, tým prohrál)
-        diaz = db.query(FootballPlayer).filter(FootballPlayer.name == "Diaz Luis").first()
-        for home, away in [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]:
-            swiss_col = db.query(Match).filter(
-                Match.home_team == home, Match.away_team == away,
-                Match.game_id == game.id,
-            ).first()
-            if diaz and swiss_col:
-                s = db.query(PlayerMatchStats).filter(
-                    PlayerMatchStats.player_id == diaz.id,
-                    PlayerMatchStats.match_id == swiss_col.id,
-                ).first()
-                if s:
-                    s.goals = 0
-                    s.assists = 0
-                    col_home = (home == "Kolumbie")
-                    s.team_won = (col_home and swiss_col.home_score > swiss_col.away_score) or \
-                                 (not col_home and swiss_col.away_score > swiss_col.home_score)
-                    s.clean_sheet = False
-                    _recompute(s, diaz)
-
-        # 2. Romero Cristian — doplň chybějící stats (Argentina vyhrála 3:2, Egypt dal 2 góly)
+        # 1. Romero Cristian — nastav Flashscore external_id, pak re-fetchni stats
+        #    Flashscore jméno: "Romero C." → jméno nesouhlasí → import selhal.
+        #    external_id "jBZTWXMn" jsme zjistili z df_li_ feedu pro zápas Argentina vs Egypt.
         romero = db.query(FootballPlayer).filter(FootballPlayer.name == "Romero Cristian").first()
+        if romero and not romero.external_id:
+            romero.external_id = "jBZTWXMn"
+            db.flush()
+
         for home, away in [("Argentina", "Egypt"), ("Egypt", "Argentina")]:
-            arg_egy = db.query(Match).filter(
+            m = db.query(Match).filter(
                 Match.home_team == home, Match.away_team == away,
-                Match.game_id == game.id,
+                Match.game_id == game.id, Match.external_id.isnot(None),
             ).first()
-            if romero and arg_egy:
-                existing = db.query(PlayerMatchStats).filter(
-                    PlayerMatchStats.player_id == romero.id,
-                    PlayerMatchStats.match_id == arg_egy.id,
-                ).first()
-                if not existing:
-                    arg_home = (home == "Argentina")
-                    arg_won = (arg_home and arg_egy.home_score > arg_egy.away_score) or \
-                              (not arg_home and arg_egy.away_score > arg_egy.home_score)
-                    s = PlayerMatchStats(
-                        match_id=arg_egy.id,
-                        player_id=romero.id,
-                        goals=0,
-                        assists=0,
-                        played=True,
-                        minutes_played=90,
-                        team_won=arg_won,
-                        clean_sheet=False,
-                    )
-                    db.add(s)
-                    db.flush()
-                    _recompute(s, romero)
+            if m:
+                r = RefreshResult()
+                for sd in provider.fetch_player_stats(m.external_id):
+                    _upsert_stats(db, sd, m, r)
+                _recompute_match_points(db, m, game.id)
+                break
+
+        # 2. Díaz Luis — re-fetchni reálná data ze Flashscore (přepíše false gól)
+        for home, away in [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]:
+            m = db.query(Match).filter(
+                Match.home_team == home, Match.away_team == away,
+                Match.game_id == game.id, Match.external_id.isnot(None),
+            ).first()
+            if m:
+                r = RefreshResult()
+                for sd in provider.fetch_player_stats(m.external_id):
+                    _upsert_stats(db, sd, m, r)
+                _recompute_match_points(db, m, game.id)
+                break
 
         db.add(AppCache(
-            key="playoff_stats_fix_v1",
+            key="playoff_stats_fix_v3",
             value="done",
             updated_at=__import__("datetime").datetime.utcnow(),
         ))
