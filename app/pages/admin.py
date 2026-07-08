@@ -273,16 +273,36 @@ if not (ext_done and stats_done):
         from app.providers.base import RefreshResult as _RR
         from datetime import datetime as _dt
 
-        # Krok A: nastav Romero external_id
+        # Krok A: sluč duplikátního "Romero C." s "Romero Cristian"
         try:
             romero = db.query(_FP).filter(_FP.name == "Romero Cristian").first()
-            if romero:
-                st.write(f"Romero nalezen (id={romero.id}, ext_id={romero.external_id})")
-                if not romero.external_id:
-                    romero.external_id = "jBZTWXMn"
-                    st.write("→ external_id nastaven na jBZTWXMn")
-            else:
+            duplicate = db.query(_FP).filter(_FP.external_id == "jBZTWXMn").first()
+
+            if not romero:
                 st.error("Romero Cristian nenalezen v DB!")
+            elif duplicate and duplicate.id != romero.id:
+                st.write(f"Duplikát nalezen: '{duplicate.name}' (id={duplicate.id}) → přesouvám stats na Romero Cristian (id={romero.id})")
+                from app.models.models import PlayerMatchStats as _PMS
+                dup_stats = db.query(_PMS).filter(_PMS.player_id == duplicate.id).all()
+                for s in dup_stats:
+                    exists = db.query(_PMS).filter(
+                        _PMS.player_id == romero.id,
+                        _PMS.match_id == s.match_id,
+                    ).first()
+                    if not exists:
+                        s.player_id = romero.id
+                    else:
+                        db.delete(s)
+                db.flush()
+                db.delete(duplicate)
+                db.flush()
+                romero.external_id = "jBZTWXMn"
+                st.write(f"→ Duplikát smazán, external_id přiřazen Romerovi")
+            elif not romero.external_id:
+                romero.external_id = "jBZTWXMn"
+                st.write("→ external_id nastaven")
+            else:
+                st.write(f"Romero external_id již: {romero.external_id}")
 
             if not db.get(_AC2, "playoff_fix_ext_id_v1"):
                 db.add(_AC2(key="playoff_fix_ext_id_v1", value="done", updated_at=_dt.utcnow()))
