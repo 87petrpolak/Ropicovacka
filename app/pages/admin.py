@@ -255,6 +255,27 @@ if st.button("🔍 Zjisti ZEE tournament IDs z dnešního feedu"):
         st.write(f"  `{zee}` → {cnt} zápasů")
 
 st.divider()
+st.subheader("Oprava stats (Romero + Díaz Luis)")
+from app.models.models import AppCache as _AC
+ext_done = db.get(_AC, "playoff_fix_ext_id_v1")
+stats_done = db.get(_AC, "playoff_fix_stats_v1")
+if ext_done and stats_done:
+    st.success("✅ Oprava proběhla úspěšně (external_id + stats).")
+elif ext_done:
+    st.warning("⚠️ External_id nastaveno, ale stats ještě nenačteny ze Flashscore. Zkusíme znovu při příštím startu, nebo klikni níže.")
+else:
+    st.error("❌ Oprava ještě neproběhla.")
+if not (ext_done and stats_done):
+    if st.button("▶️ Spustit opravu teď", type="primary"):
+        try:
+            from app.db import _fix_playoff_stats
+            from app.db import engine as _eng
+            _fix_playoff_stats(_eng)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Chyba: {e}")
+
+st.divider()
 st.subheader("Debug & import stats konkrétního zápasu")
 st.caption(
     "Načte hráče ze Flashscore pro vybraný zápas a ukáže, kdo byl nalezen v draftu. "
