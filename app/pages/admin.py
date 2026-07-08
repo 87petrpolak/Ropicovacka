@@ -255,6 +255,69 @@ if st.button("🔍 Zjisti ZEE tournament IDs z dnešního feedu"):
         st.write(f"  `{zee}` → {cnt} zápasů")
 
 st.divider()
+st.subheader("Re-import stats zápasů")
+st.caption(
+    "Znovu načte hráčské statistiky ze Flashscore pro všechny odehrané zápasy. "
+    "Použij pokud hráč chybí v přehledu bodů — např. byl přidán do draftu až po odehrání zápasu."
+)
+if st.button("🔄 Re-importovat stats ze Flashscore", type="secondary"):
+    try:
+        from app.models.models import Match as _Match
+        from app.providers.livesport_provider import LivesportProvider
+        from app.services.data_refresh import _upsert_stats, _recompute_match_points
+        from app.providers.base import RefreshResult as _RefreshResult
+
+        finished = (
+            db.query(_Match)
+            .filter(
+                _Match.game_id == game_id,
+                _Match.is_finished == True,
+                _Match.external_id.isnot(None),
+            )
+            .order_by(_Match.played_at)
+            .all()
+        )
+
+        if not finished:
+            st.warning("Žádné odehrané zápasy s external_id v DB.")
+        else:
+            provider = LivesportProvider()
+            total_added = total_updated = 0
+            errs = []
+            for m in finished:
+                try:
+                    stats_data = provider.fetch_player_stats(m.external_id)
+                    r = _RefreshResult()
+                    unmatched = []
+                    for sd in stats_data:
+                        pl = None
+                        if sd.player_external_id:
+                            from app.models.models import FootballPlayer as _FP
+                            pl = db.query(_FP).filter(_FP.external_id == sd.player_external_id).first()
+                        if pl is None:
+                            from app.models.models import FootballPlayer as _FP
+                            pl = db.query(_FP).filter(_FP.name == sd.player_name).first()
+                        if pl is None:
+                            unmatched.append(sd.player_name)
+                        _upsert_stats(db, sd, m, r)
+                    _recompute_match_points(db, m, game_id)
+                    total_added += r.stats_added
+                    total_updated += r.stats_updated
+                    label = f"{m.home_team or '?'} vs {m.away_team or '?'}"
+                    st.write(f"✅ **{label}**: +{r.stats_added} přidáno / ↺{r.stats_updated} aktualizováno")
+                    if unmatched:
+                        st.caption(f"   ⚠️ Nenalezeni v draftu: {', '.join(unmatched)}")
+                except Exception as em:
+                    errs.append(f"{m.external_id}: {em}")
+            db.commit()
+            st.success(f"Hotovo — celkem přidáno {total_added}, aktualizováno {total_updated} stats")
+            if errs:
+                st.warning("Chyby:\n" + "\n".join(f"- {e}" for e in errs))
+    except Exception as e:
+        db.rollback()
+        st.error(f"Chyba: {e}")
+
+st.divider()
 st.subheader("Playoff posily")
 st.caption("Přidá 9 hráčů (3 per účastník) draftovaných před play-off MS 2026.")
 if st.button("➕ Přidat playoff posily do kádru", type="primary"):
