@@ -248,8 +248,9 @@ def _fix_playoff_stats(eng):
             ))
             db.commit()
 
-        # === Krok B: re-fetchni stats ze Flashscore (Argentina vs Egypt) ===
-        if not db.get(AppCache, "playoff_fix_stats_v1"):
+        # === Krok B: re-fetchni stats ze Flashscore ===
+        # v2: opravený parser (penalty rozstřel se nepočítá), přidán Švýcarsko vs Kolumbie
+        if not db.get(AppCache, "playoff_fix_stats_v2"):
             from app.providers.livesport_provider import LivesportProvider
             from app.services.data_refresh import _upsert_stats, _recompute_match_points
             from app.providers.base import RefreshResult
@@ -257,26 +258,32 @@ def _fix_playoff_stats(eng):
             provider = LivesportProvider()
             errors = []
 
-            for home, away in [("Argentina", "Egypt"), ("Egypt", "Argentina")]:
-                m = db.query(Match).filter(
-                    Match.home_team == home, Match.away_team == away,
-                    Match.game_id == game.id, Match.external_id.isnot(None),
-                ).first()
-                if m:
-                    try:
-                        r = RefreshResult()
-                        for sd in provider.fetch_player_stats(m.external_id):
-                            _upsert_stats(db, sd, m, r)
-                        _recompute_match_points(db, m, game.id)
-                        db.flush()
-                        print(f"[playoff_fix] {home} vs {away}: +{r.stats_added} ↺{r.stats_updated}")
-                    except Exception as e:
-                        errors.append(f"Argentina vs Egypt: {e}")
-                    break
+            for label, pairs in [
+                ("Argentina vs Egypt",    [("Argentina", "Egypt"), ("Egypt", "Argentina")]),
+                ("Švýcarsko vs Kolumbie", [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]),
+            ]:
+                for home, away in pairs:
+                    m = db.query(Match).filter(
+                        Match.home_team == home, Match.away_team == away,
+                        Match.game_id == game.id, Match.external_id.isnot(None),
+                    ).first()
+                    if m:
+                        try:
+                            r = RefreshResult()
+                            for sd in provider.fetch_player_stats(m.external_id):
+                                _upsert_stats(db, sd, m, r)
+                            _recompute_match_points(db, m, game.id)
+                            db.flush()
+                            print(f"[playoff_fix] {label}: +{r.stats_added} ↺{r.stats_updated}")
+                        except Exception as e:
+                            errors.append(f"{label}: {e}")
+                        break
+                else:
+                    print(f"[playoff_fix] {label}: nenalezen v DB nebo chybí external_id")
 
             if not errors:
                 db.add(AppCache(
-                    key="playoff_fix_stats_v1",
+                    key="playoff_fix_stats_v2",
                     value="done",
                     updated_at=__import__("datetime").datetime.utcnow(),
                 ))
@@ -288,7 +295,7 @@ def _fix_playoff_stats(eng):
         # Hledáme hráče jejichž tým v daném zápase neskóroval, ale player má goals > 0.
         # To je fyzicky nemožné — gól musí být false positive z parsování.
         # Pokud zápas má external_id, zkusíme Flashscore; jinak nastavíme 0 ze skóre.
-        if not db.get(AppCache, "playoff_fix_diaz_v1"):
+        if not db.get(AppCache, "playoff_fix_diaz_v2"):
             from app.services.data_refresh import _recompute_match_points
 
             fixed_match_ids: set[int] = set()
@@ -350,7 +357,7 @@ def _fix_playoff_stats(eng):
                     _recompute_match_points(db, m, game.id)
 
             db.add(AppCache(
-                key="playoff_fix_diaz_v1",
+                key="playoff_fix_diaz_v2",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))

@@ -258,8 +258,8 @@ st.divider()
 st.subheader("Oprava stats (Romero + Díaz Luis)")
 from app.models.models import AppCache as _AC
 ext_done = db.get(_AC, "playoff_fix_ext_id_v1")
-stats_done = db.get(_AC, "playoff_fix_stats_v1")
-diaz_done = db.get(_AC, "playoff_fix_diaz_v1")
+stats_done = db.get(_AC, "playoff_fix_stats_v2")
+diaz_done = db.get(_AC, "playoff_fix_diaz_v2")
 all_fixed = bool(ext_done and stats_done and diaz_done)
 if all_fixed:
     st.success("✅ Romero external_id ✅ Argentina vs Egypt stats ✅ Díaz Luis false gól opraven")
@@ -313,37 +313,42 @@ if not all_fixed:
             db.rollback()
             st.error(f"Krok A selhal: {e}")
 
-        # Krok B: fetch stats ze Flashscore (Argentina vs Egypt)
-        if not db.get(_AC2, "playoff_fix_stats_v1"):
+        # Krok B: fetch stats ze Flashscore (opravený parser — penalty rozstřel se nepočítá)
+        if not db.get(_AC2, "playoff_fix_stats_v2"):
             provider = _LSP()
             b_ok = True
-            for home, away in [("Argentina", "Egypt"), ("Egypt", "Argentina")]:
-                m = db.query(_M).filter(
-                    _M.home_team == home, _M.away_team == away,
-                    _M.game_id == game_id, _M.external_id.isnot(None),
-                ).first()
-                if m:
-                    st.write(f"**Argentina vs Egypt**: match_id={m.external_id}")
-                    try:
-                        stats_data = provider.fetch_player_stats(m.external_id)
-                        st.write(f"  → Flashscore vrátil {len(stats_data)} hráčů")
-                        r = _RR()
-                        for sd in stats_data:
-                            _upsert_stats(db, sd, m, r)
-                        _recompute_match_points(db, m, game_id)
-                        db.commit()
-                        st.success(f"  ✅ +{r.stats_added} přidáno, ↺{r.stats_updated} aktualizováno")
-                    except Exception as e:
-                        db.rollback()
-                        st.error(f"  ❌ {e}")
-                        b_ok = False
-                    break
-            else:
-                st.warning("Argentina vs Egypt: zápas nenalezen v DB (chybí external_id)")
-                b_ok = False
+            for label, pairs in [
+                ("Argentina vs Egypt",    [("Argentina", "Egypt"), ("Egypt", "Argentina")]),
+                ("Švýcarsko vs Kolumbie", [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]),
+            ]:
+                found = False
+                for home, away in pairs:
+                    m = db.query(_M).filter(
+                        _M.home_team == home, _M.away_team == away,
+                        _M.game_id == game_id, _M.external_id.isnot(None),
+                    ).first()
+                    if m:
+                        found = True
+                        st.write(f"**{label}**: match_id={m.external_id}")
+                        try:
+                            stats_data = provider.fetch_player_stats(m.external_id)
+                            st.write(f"  → Flashscore vrátil {len(stats_data)} hráčů")
+                            r = _RR()
+                            for sd in stats_data:
+                                _upsert_stats(db, sd, m, r)
+                            _recompute_match_points(db, m, game_id)
+                            db.commit()
+                            st.success(f"  ✅ +{r.stats_added} přidáno, ↺{r.stats_updated} aktualizováno")
+                        except Exception as e:
+                            db.rollback()
+                            st.error(f"  ❌ {e}")
+                            b_ok = False
+                        break
+                if not found:
+                    st.warning(f"{label}: nenalezen v DB (chybí external_id) — Krok C to dořeší")
             if b_ok:
                 try:
-                    db.add(_AC2(key="playoff_fix_stats_v1", value="done", updated_at=_dt.utcnow()))
+                    db.add(_AC2(key="playoff_fix_stats_v2", value="done", updated_at=_dt.utcnow()))
                     db.commit()
                 except Exception:
                     db.rollback()
@@ -351,7 +356,7 @@ if not all_fixed:
             st.write("Krok B: již hotovo")
 
         # Krok C: oprav false góly (Díaz Luis + kdokoli else kde tým neskóroval)
-        if not db.get(_AC2, "playoff_fix_diaz_v1"):
+        if not db.get(_AC2, "playoff_fix_diaz_v2"):
             st.write("**Krok C**: hledám false góly...")
             fixed_match_ids: set[int] = set()
             all_stats_goals = db.query(_PMS).filter(_PMS.goals > 0).all()
@@ -403,7 +408,7 @@ if not all_fixed:
                 if m:
                     _recompute_match_points(db, m, game_id)
             try:
-                db.add(_AC2(key="playoff_fix_diaz_v1", value="done", updated_at=_dt.utcnow()))
+                db.add(_AC2(key="playoff_fix_diaz_v2", value="done", updated_at=_dt.utcnow()))
                 db.commit()
                 st.success(f"✅ Krok C hotov ({len(fixed_match_ids)} zápasů opraveno)")
             except Exception as e_c2:

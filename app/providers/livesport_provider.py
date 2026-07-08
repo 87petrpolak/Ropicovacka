@@ -468,6 +468,13 @@ class LivesportProvider(BaseFootballDataProvider):
             im_list = kv.get("IM", [])
             ik_list = kv.get("IK", [])
 
+            # Detekce penaltového rozstřelu.
+            # Flashscore označuje period kódem v poli IC:
+            #   1=H1, 2=H2, 3=ET1, 4=ET2, 5/6/7=penalty shootout
+            # Góly z penaltového rozstřelu se nepočítají do herních statistik.
+            ic_val = kv.get("IC", [""])[0]
+            is_shootout = ic_val in ("5", "6", "7")
+
             for i, ik in enumerate(ik_list):
                 name = (if_list[i] if i < len(if_list) else "").strip()
                 url = (iu_list[i] if i < len(iu_list) else "").strip()
@@ -477,6 +484,8 @@ class LivesportProvider(BaseFootballDataProvider):
                 key = pid or url or name
 
                 if ik in _INCIDENT_GOALS:
+                    if is_shootout:
+                        continue  # Penaltový rozstřel — nepočítáme jako gól
                     p = _get_or_create(key, name, pid, team_side)
                     p["goals"] += 1
                     goals_timeline.append((minute, team_side))
