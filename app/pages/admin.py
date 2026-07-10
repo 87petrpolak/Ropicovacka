@@ -259,7 +259,7 @@ st.subheader("Oprava stats (Romero + Díaz Luis)")
 from app.models.models import AppCache as _AC
 ext_done = db.get(_AC, "playoff_fix_ext_id_v1")
 stats_done = db.get(_AC, "playoff_fix_stats_v2")
-diaz_done = db.get(_AC, "playoff_fix_diaz_v5")
+diaz_done = db.get(_AC, "playoff_fix_diaz_v6")
 all_fixed = bool(ext_done and stats_done and diaz_done)
 if all_fixed:
     st.success("✅ Romero external_id ✅ Argentina vs Egypt stats ✅ Díaz Luis false gól opraven")
@@ -357,7 +357,7 @@ if not all_fixed:
 
         # Krok C: oprav false góly (Díaz Luis + kdokoli else kde tým neskóroval)
         # Skóre v DB je ground truth — nepotřebujeme re-fetch ze Flashscore.
-        if not db.get(_AC2, "playoff_fix_diaz_v5"):
+        if not db.get(_AC2, "playoff_fix_diaz_v6"):
             st.write("**Krok C**: hledám false góly...")
             fixed_match_ids: set[int] = set()
             all_stats_goals = db.query(_PMS).filter(_PMS.goals > 0).all()
@@ -368,29 +368,33 @@ if not all_fixed:
                     continue
                 home = match.home_score or 0
                 away = match.away_score or 0
-                if home == away:
-                    if home == 0:
-                        player_team_goals = 0
-                    else:
-                        continue
-                elif stat.team_won:
-                    player_team_goals = max(home, away)
+                player_team = player.club or player.country or ""
+                if player_team and player_team == match.home_team:
+                    player_team_goals = home
+                elif player_team and player_team == match.away_team:
+                    player_team_goals = away
                 else:
-                    player_team_goals = min(home, away)
+                    if home == away:
+                        player_team_goals = 0 if home == 0 else None
+                    elif stat.team_won:
+                        player_team_goals = max(home, away)
+                    else:
+                        player_team_goals = min(home, away)
+                    if player_team_goals is None:
+                        continue
                 if player_team_goals > 0:
                     continue
-                # Tým skóroval 0 dle výsledku — gól je fyzicky nemožný
                 old_goals = stat.goals
                 stat.goals = 0
                 fixed_match_ids.add(match.id)
-                st.write(f"  {player.name}: goals {old_goals}→0 "
+                st.write(f"  {player.name} ({player_team}): goals {old_goals}→0 "
                          f"v {match.home_team} {home}-{away} {match.away_team}")
             for mid in fixed_match_ids:
                 m = db.get(_M, mid)
                 if m:
                     _recompute_match_points(db, m, game_id)
             try:
-                db.add(_AC2(key="playoff_fix_diaz_v5", value="done", updated_at=_dt.utcnow()))
+                db.add(_AC2(key="playoff_fix_diaz_v6", value="done", updated_at=_dt.utcnow()))
                 db.commit()
                 st.success(f"✅ Krok C hotov ({len(fixed_match_ids)} zápasů opraveno)")
             except Exception as e_c2:

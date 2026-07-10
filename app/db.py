@@ -295,7 +295,7 @@ def _fix_playoff_stats(eng):
         # Hledáme hráče jejichž tým v daném zápase neskóroval, ale player má goals > 0.
         # To je fyzicky nemožné — gól musí být false positive (např. z penaltového rozstřelu).
         # Skóre v DB je ground truth — nepotřebujeme re-fetch ze Flashscore.
-        if not db.get(AppCache, "playoff_fix_diaz_v5"):
+        if not db.get(AppCache, "playoff_fix_diaz_v6"):
             from app.services.data_refresh import _recompute_match_points
 
             fixed_match_ids: set[int] = set()
@@ -313,30 +313,33 @@ def _fix_playoff_stats(eng):
                 home = match.home_score or 0
                 away = match.away_score or 0
 
-                # Zjisti kolik gólů dal hráčův tým — bez nutnosti znát club/country.
-                # team_won=True → hráč je na vítězné straně, jejich góly = max(home, away)
-                # team_won=False a match má vítěze → hráč je na prohrávající straně, góly = min
-                # Remíza 0-0 → oba týmy daly 0, jakýkoli gól je false positive
-                # Remíza X-X (X>0) → nedokážeme bezpečně určit stranu bez lineup dat → skip
-                if home == away:
-                    if home == 0:
-                        player_team_goals = 0  # 0-0 remíza, gól nemohl padnout
-                    else:
-                        continue  # nenulová remíza, přeskočíme (nelze určit stranu)
-                elif stat.team_won:
-                    player_team_goals = max(home, away)
+                # Zjisti kolik gólů dal hráčův tým.
+                # Primárně: porovnej player.club/country s match.home_team/away_team (přesné).
+                # Fallback: team_won flag — může být špatně uložen, proto ho nepoužíváme jako primární.
+                player_team = player.club or player.country or ""
+                if player_team and player_team == match.home_team:
+                    player_team_goals = home
+                elif player_team and player_team == match.away_team:
+                    player_team_goals = away
                 else:
-                    player_team_goals = min(home, away)
+                    # Jméno týmu nesedí → fallback přes team_won
+                    if home == away:
+                        player_team_goals = 0 if home == 0 else None
+                    elif stat.team_won:
+                        player_team_goals = max(home, away)
+                    else:
+                        player_team_goals = min(home, away)
+                    if player_team_goals is None:
+                        continue  # nenulová remíza, nelze určit
 
                 if player_team_goals > 0:
-                    continue  # tým skóroval, gól může být validní
+                    continue  # tým skóroval, gól je validní
 
-                # Tým skóroval 0 dle výsledku — gól je fyzicky nemožný, nastav přímo 0.
-                # Re-fetch ze Flashscore by mohl vrátit 1 (pokud IC filtr pro rozstřel nefunguje)
-                # a přepsat správnou hodnotu zpět — proto re-fetch nepoužíváme.
+                # Tým skóroval 0 dle výsledku — gól je fyzicky nemožný.
                 stat.goals = 0
                 fixed_match_ids.add(match.id)
-                print(f"[playoff_fix C] {player.name}: goals=0 ({match.home_team} {home}-{away} {match.away_team})")
+                print(f"[playoff_fix C] {player.name} ({player_team}): goals=0 "
+                      f"({match.home_team} {home}-{away} {match.away_team})")
 
             for mid in fixed_match_ids:
                 m = db.get(Match, mid)
@@ -344,7 +347,7 @@ def _fix_playoff_stats(eng):
                     _recompute_match_points(db, m, game.id)
 
             db.add(AppCache(
-                key="playoff_fix_diaz_v5",
+                key="playoff_fix_diaz_v6",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))
