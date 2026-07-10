@@ -293,9 +293,9 @@ def _fix_playoff_stats(eng):
 
         # === Krok C: oprav false góly — odvozeno ze skóre zápasu ===
         # Hledáme hráče jejichž tým v daném zápase neskóroval, ale player má goals > 0.
-        # To je fyzicky nemožné — gól musí být false positive z parsování.
-        # Pokud zápas má external_id, zkusíme Flashscore; jinak nastavíme 0 ze skóre.
-        if not db.get(AppCache, "playoff_fix_diaz_v4"):
+        # To je fyzicky nemožné — gól musí být false positive (např. z penaltového rozstřelu).
+        # Skóre v DB je ground truth — nepotřebujeme re-fetch ze Flashscore.
+        if not db.get(AppCache, "playoff_fix_diaz_v5"):
             from app.services.data_refresh import _recompute_match_points
 
             fixed_match_ids: set[int] = set()
@@ -331,35 +331,12 @@ def _fix_playoff_stats(eng):
                 if player_team_goals > 0:
                     continue  # tým skóroval, gól může být validní
 
-                # Tým neskóroval 0 — gól je false positive
-                corrected = False
-                if match.external_id:
-                    try:
-                        from app.providers.livesport_provider import LivesportProvider
-                        prov = LivesportProvider()
-                        for sd in prov.fetch_player_stats(match.external_id):
-                            pid_match = (sd.player_external_id and
-                                         sd.player_external_id == player.external_id)
-                            name_match = sd.player_name == player.name
-                            if pid_match or name_match:
-                                stat.goals = sd.goals
-                                stat.assists = sd.assists
-                                corrected = True
-                                break
-                        if not corrected:
-                            stat.goals = 0
-                            corrected = True
-                    except Exception as e:
-                        print(f"[playoff_fix C] Flashscore fetch selhal ({player.name}): {e}")
-                        stat.goals = 0
-                        corrected = True
-                else:
-                    stat.goals = 0
-                    corrected = True
-
-                if corrected:
-                    fixed_match_ids.add(match.id)
-                    print(f"[playoff_fix C] {player.name}: goals opraveny v {match.home_team} vs {match.away_team}")
+                # Tým skóroval 0 dle výsledku — gól je fyzicky nemožný, nastav přímo 0.
+                # Re-fetch ze Flashscore by mohl vrátit 1 (pokud IC filtr pro rozstřel nefunguje)
+                # a přepsat správnou hodnotu zpět — proto re-fetch nepoužíváme.
+                stat.goals = 0
+                fixed_match_ids.add(match.id)
+                print(f"[playoff_fix C] {player.name}: goals=0 ({match.home_team} {home}-{away} {match.away_team})")
 
             for mid in fixed_match_ids:
                 m = db.get(Match, mid)
@@ -367,7 +344,7 @@ def _fix_playoff_stats(eng):
                     _recompute_match_points(db, m, game.id)
 
             db.add(AppCache(
-                key="playoff_fix_diaz_v4",
+                key="playoff_fix_diaz_v5",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))
