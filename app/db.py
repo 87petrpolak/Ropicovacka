@@ -295,7 +295,7 @@ def _fix_playoff_stats(eng):
         # Hledáme hráče jejichž tým v daném zápase neskóroval, ale player má goals > 0.
         # To je fyzicky nemožné — gól musí být false positive z parsování.
         # Pokud zápas má external_id, zkusíme Flashscore; jinak nastavíme 0 ze skóre.
-        if not db.get(AppCache, "playoff_fix_diaz_v2"):
+        if not db.get(AppCache, "playoff_fix_diaz_v3"):
             from app.services.data_refresh import _recompute_match_points
 
             fixed_match_ids: set[int] = set()
@@ -307,16 +307,20 @@ def _fix_playoff_stats(eng):
             for stat in all_stats_with_goals:
                 player = db.get(FootballPlayer, stat.player_id)
                 match = db.get(Match, stat.match_id)
-                if not player or not match or not player.club:
+                if not player or not match:
                     continue
 
-                club = player.club
-                if match.home_team == club:
+                # Identifikace týmu hráče: zkusíme club i country (national team)
+                team_id = player.club or player.country or ""
+                if not team_id:
+                    continue
+
+                if match.home_team == team_id:
                     club_goals = match.home_score or 0
-                elif match.away_team == club:
+                elif match.away_team == team_id:
                     club_goals = match.away_score or 0
                 else:
-                    continue  # hráčův klub nehrál v tomto zápase
+                    continue  # hráčův tým nehrál v tomto zápase
 
                 if club_goals > 0:
                     continue  # tým skóroval, gól může být validní
@@ -357,7 +361,7 @@ def _fix_playoff_stats(eng):
                     _recompute_match_points(db, m, game.id)
 
             db.add(AppCache(
-                key="playoff_fix_diaz_v2",
+                key="playoff_fix_diaz_v3",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))
