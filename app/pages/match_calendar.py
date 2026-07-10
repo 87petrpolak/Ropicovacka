@@ -110,33 +110,18 @@ round_number = selected_round.round_number
 
 match_for_team: dict[str, dict] = {}
 
-if round_number <= 3:
-    # Skupiny: Nth skupinový zápas každého týmu (pořadí dle data)
-    team_count: dict[str, int] = {}
-    for m in all_matches:
-        if m.get("is_playoff"):
+# Nth zápas každého týmu celkově dle data (skupiny i playoff dohromady).
+# Round 1-3 = skupinové zápasy, Round 4+ = R32/R16/QF/SF/F.
+# Nevyžaduje is_playoff flag — funguje bez ohledu na název Flashscore sekce.
+team_count: dict[str, int] = {}
+for m in all_matches:
+    home, away = m.get("home", ""), m.get("away", "")
+    for team, opp in [(home, away), (away, home)]:
+        if not team:
             continue
-        home, away = m.get("home", ""), m.get("away", "")
-        for team, opp in [(home, away), (away, home)]:
-            if not team:
-                continue
-            team_count[team] = team_count.get(team, 0) + 1
-            if team_count[team] == round_number:
-                match_for_team[team] = m
-else:
-    # Playoff: (round_number - 3)th playoff zápas každého týmu
-    playoff_target = round_number - 3
-    playoff_count: dict[str, int] = {}
-    for m in all_matches:
-        if not m.get("is_playoff"):
-            continue
-        home, away = m.get("home", ""), m.get("away", "")
-        for team, opp in [(home, away), (away, home)]:
-            if not team:
-                continue
-            playoff_count[team] = playoff_count.get(team, 0) + 1
-            if playoff_count[team] == playoff_target:
-                match_for_team[team] = m
+        team_count[team] = team_count.get(team, 0) + 1
+        if team_count[team] == round_number:
+            match_for_team[team] = m
 
 seen_ids: set[str] = set()
 relevant: list[dict] = []
