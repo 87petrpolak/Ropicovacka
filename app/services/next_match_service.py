@@ -117,8 +117,10 @@ def _fetch_all_from_api() -> list[dict]:
             for rec in records:
                 if "ZEE" in rec:
                     in_wc = rec.get("ZEE") == WC_TOURNAMENT_ID
-                    # Flashscore rozlišuje skupiny ("Mistrovství světa") a play-off ("- Play Off")
-                    section_is_playoff = "Play Off" in rec.get("ZA", "")
+                    # Skupinové zápasy mají ZA="Skupina X", playoff zápasy mají jiný název.
+                    # Detekujeme playoff jako "ZA je neprázdné a neobsahuje 'Skupina'".
+                    za = rec.get("ZA", "")
+                    section_is_playoff = bool(za) and "Skupina" not in za
                     continue
                 if not in_wc or "AA" not in rec or "AE" not in rec:
                     continue
