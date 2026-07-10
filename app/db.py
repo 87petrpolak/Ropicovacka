@@ -295,7 +295,7 @@ def _fix_playoff_stats(eng):
         # Hledáme hráče jejichž tým v daném zápase neskóroval, ale player má goals > 0.
         # To je fyzicky nemožné — gól musí být false positive z parsování.
         # Pokud zápas má external_id, zkusíme Flashscore; jinak nastavíme 0 ze skóre.
-        if not db.get(AppCache, "playoff_fix_diaz_v3"):
+        if not db.get(AppCache, "playoff_fix_diaz_v4"):
             from app.services.data_refresh import _recompute_match_points
 
             fixed_match_ids: set[int] = set()
@@ -310,19 +310,25 @@ def _fix_playoff_stats(eng):
                 if not player or not match:
                     continue
 
-                # Identifikace týmu hráče: zkusíme club i country (national team)
-                team_id = player.club or player.country or ""
-                if not team_id:
-                    continue
+                home = match.home_score or 0
+                away = match.away_score or 0
 
-                if match.home_team == team_id:
-                    club_goals = match.home_score or 0
-                elif match.away_team == team_id:
-                    club_goals = match.away_score or 0
+                # Zjisti kolik gólů dal hráčův tým — bez nutnosti znát club/country.
+                # team_won=True → hráč je na vítězné straně, jejich góly = max(home, away)
+                # team_won=False a match má vítěze → hráč je na prohrávající straně, góly = min
+                # Remíza 0-0 → oba týmy daly 0, jakýkoli gól je false positive
+                # Remíza X-X (X>0) → nedokážeme bezpečně určit stranu bez lineup dat → skip
+                if home == away:
+                    if home == 0:
+                        player_team_goals = 0  # 0-0 remíza, gól nemohl padnout
+                    else:
+                        continue  # nenulová remíza, přeskočíme (nelze určit stranu)
+                elif stat.team_won:
+                    player_team_goals = max(home, away)
                 else:
-                    continue  # hráčův tým nehrál v tomto zápase
+                    player_team_goals = min(home, away)
 
-                if club_goals > 0:
+                if player_team_goals > 0:
                     continue  # tým skóroval, gól může být validní
 
                 # Tým neskóroval 0 — gól je false positive
@@ -361,7 +367,7 @@ def _fix_playoff_stats(eng):
                     _recompute_match_points(db, m, game.id)
 
             db.add(AppCache(
-                key="playoff_fix_diaz_v3",
+                key="playoff_fix_diaz_v4",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))

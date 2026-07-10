@@ -259,7 +259,7 @@ st.subheader("Oprava stats (Romero + Díaz Luis)")
 from app.models.models import AppCache as _AC
 ext_done = db.get(_AC, "playoff_fix_ext_id_v1")
 stats_done = db.get(_AC, "playoff_fix_stats_v2")
-diaz_done = db.get(_AC, "playoff_fix_diaz_v3")
+diaz_done = db.get(_AC, "playoff_fix_diaz_v4")
 all_fixed = bool(ext_done and stats_done and diaz_done)
 if all_fixed:
     st.success("✅ Romero external_id ✅ Argentina vs Egypt stats ✅ Díaz Luis false gól opraven")
@@ -356,7 +356,7 @@ if not all_fixed:
             st.write("Krok B: již hotovo")
 
         # Krok C: oprav false góly (Díaz Luis + kdokoli else kde tým neskóroval)
-        if not db.get(_AC2, "playoff_fix_diaz_v3"):
+        if not db.get(_AC2, "playoff_fix_diaz_v4"):
             st.write("**Krok C**: hledám false góly...")
             fixed_match_ids: set[int] = set()
             all_stats_goals = db.query(_PMS).filter(_PMS.goals > 0).all()
@@ -365,16 +365,18 @@ if not all_fixed:
                 match = db.get(_M, stat.match_id)
                 if not player or not match:
                     continue
-                team_id = player.club or player.country or ""
-                if not team_id:
-                    continue
-                if match.home_team == team_id:
-                    club_goals = match.home_score or 0
-                elif match.away_team == team_id:
-                    club_goals = match.away_score or 0
+                home = match.home_score or 0
+                away = match.away_score or 0
+                if home == away:
+                    if home == 0:
+                        player_team_goals = 0
+                    else:
+                        continue
+                elif stat.team_won:
+                    player_team_goals = max(home, away)
                 else:
-                    continue
-                if club_goals > 0:
+                    player_team_goals = min(home, away)
+                if player_team_goals > 0:
                     continue
                 # Tým neskóroval — oprav gól
                 old_goals = stat.goals
@@ -410,7 +412,7 @@ if not all_fixed:
                 if m:
                     _recompute_match_points(db, m, game_id)
             try:
-                db.add(_AC2(key="playoff_fix_diaz_v3", value="done", updated_at=_dt.utcnow()))
+                db.add(_AC2(key="playoff_fix_diaz_v4", value="done", updated_at=_dt.utcnow()))
                 db.commit()
                 st.success(f"✅ Krok C hotov ({len(fixed_match_ids)} zápasů opraveno)")
             except Exception as e_c2:
