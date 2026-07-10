@@ -21,7 +21,7 @@ PRAGUE_TZ = timezone(timedelta(hours=2))  # CEST (léto)
 
 _CACHE_KEY_ALL = "ms_all_matches_v4"  # v4: force refresh pro čtvrtfinálové zápasy
 _CACHE_KEY_NEXT = "ms_next_matches"
-_CACHE_TTL_HOURS = 2
+_CACHE_TTL_HOURS = 0.5  # 30 min — aby se čtvrtfinálové zápasy načetly rychle po potvrzení
 
 
 # ----------------------------------------------------------------
