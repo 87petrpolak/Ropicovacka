@@ -19,7 +19,7 @@ _HEADERS = {
 WC_TOURNAMENT_ID = "lvUBR5F8"
 PRAGUE_TZ = timezone(timedelta(hours=2))  # CEST (léto)
 
-_CACHE_KEY_ALL = "ms_all_matches_v4"  # v4: force refresh pro čtvrtfinálové zápasy
+_CACHE_KEY_ALL = "ms_all_matches_v5"  # v5: force refresh s opravenou is_playoff detekcí
 _CACHE_KEY_NEXT = "ms_next_matches"
 _CACHE_TTL_HOURS = 0.5  # 30 min — aby se čtvrtfinálové zápasy načetly rychle po potvrzení
 
