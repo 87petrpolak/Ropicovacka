@@ -124,18 +124,26 @@ if round_number <= 3:
             if team_count[team] == round_number:
                 match_for_team[team] = m
 else:
-    # Playoff: (round_number - 3)th playoff zápas každého týmu
-    playoff_target = round_number - 3
-    playoff_count: dict[str, int] = {}
-    for m in all_matches:
+    # Playoff: první playoff zápas každého týmu PO deadlinu kola.
+    # Tím se vyhneme počítání Nth zápasu — které selhává pokud Flashscore
+    # nevrátí všechna kola (R16 pro den -2 chybělo v datech).
+    deadline = selected_round.lineup_deadline
+    if deadline and deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    for m in sorted(all_matches, key=lambda x: x.get("played_at") or datetime.max.replace(tzinfo=timezone.utc)):
         if not m.get("is_playoff"):
             continue
+        played_at = m.get("played_at")
+        if deadline and played_at:
+            if played_at.tzinfo is None:
+                played_at = played_at.replace(tzinfo=timezone.utc)
+            if played_at < deadline:
+                continue
         home, away = m.get("home", ""), m.get("away", "")
         for team, opp in [(home, away), (away, home)]:
             if not team:
                 continue
-            playoff_count[team] = playoff_count.get(team, 0) + 1
-            if playoff_count[team] == playoff_target:
+            if team not in match_for_team:
                 match_for_team[team] = m
 
 seen_ids: set[str] = set()
