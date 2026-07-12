@@ -251,7 +251,7 @@ def _fix_playoff_stats(eng):
         # === Krok B: re-fetchni stats ze Flashscore ===
         # v3: opravený parser (ET góly neovlivňují team_won/clean_sheet)
         # Re-fetchuje všechny playoff zápasy v DB kde external_id existuje.
-        if not db.get(AppCache, "playoff_fix_stats_v3"):
+        if not db.get(AppCache, "playoff_fix_stats_v4"):
             from app.providers.livesport_provider import LivesportProvider
             from app.services.data_refresh import _upsert_stats, _recompute_match_points
             from app.providers.base import RefreshResult
@@ -279,7 +279,7 @@ def _fix_playoff_stats(eng):
 
             if not errors:
                 db.add(AppCache(
-                    key="playoff_fix_stats_v3",
+                    key="playoff_fix_stats_v4",
                     value="done",
                     updated_at=__import__("datetime").datetime.utcnow(),
                 ))

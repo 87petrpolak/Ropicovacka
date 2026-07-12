@@ -445,9 +445,10 @@ class LivesportProvider(BaseFootballDataProvider):
                 }
             return players[key]
 
-        # Časová osa gólů pouze za základní hrací dobu (IC=1 H1, IC=2 H2).
-        # Prodloužení (IC=3 ET1, IC=4 ET2) a rozstřel (IC=5/6/7) se
-        # do této osy nepočítají — team_won a clean_sheet se hodnotí jen po 90 min.
+        # Časová osa gólů pouze za základní hrací dobu.
+        # ET góly (base minuta > 90) a rozstřel se do osy nepočítají —
+        # team_won a clean_sheet se hodnotí jen po 90 min.
+        # Pozn.: IC pole je pro WC 2026 prázdné — detekujeme ET přes minutu v IB.
         goals_timeline_90: list[tuple[int, str]] = []
 
         for block in raw.split("~"):
@@ -463,6 +464,7 @@ class LivesportProvider(BaseFootballDataProvider):
 
             team_side = kv.get("IA", [""])[0]
             minute = _parse_minute(kv.get("IB", ["0"])[0])
+            ib_str = kv.get("IB", [""])[0]
 
             if_list = kv.get("IF", [])
             iu_list = kv.get("IU", [])
@@ -470,8 +472,12 @@ class LivesportProvider(BaseFootballDataProvider):
             ik_list = kv.get("IK", [])
 
             ic_val = kv.get("IC", [""])[0]
-            is_et = ic_val in ("3", "4")        # prodloužení
-            is_shootout = ic_val in ("5", "6", "7")  # penaltový rozstřel
+            # ET detekce: base_minute > 90 (ET běží od 91' do 120+). Rozstřel > 120.
+            # "90+X'" = nastavený čas regulérní doby (base=90), "91'" a výš = ET.
+            _base_m = re.match(r"(\d+)", ib_str)
+            _base_int = int(_base_m.group(1)) if _base_m else 0
+            is_et = _base_int > 90 and _base_int <= 120
+            is_shootout = _base_int > 120 or ic_val in ("5", "6", "7")
 
             for i, ik in enumerate(ik_list):
                 name = (if_list[i] if i < len(if_list) else "").strip()
@@ -487,7 +493,7 @@ class LivesportProvider(BaseFootballDataProvider):
                     p = _get_or_create(key, name, pid, team_side)
                     p["goals"] += 1  # Gól v prodloužení se hráči počítá
                     if not is_et:
-                        # Do časové osy jen góly ze základní doby (pro team_won/clean_sheet)
+                        # Do časové osy jen góly ze základní doby (pro clean_sheet)
                         goals_timeline_90.append((minute, team_side))
                         opposing_side = "2" if team_side == "1" else "1"
                         for op in players.values():
@@ -511,14 +517,13 @@ class LivesportProvider(BaseFootballDataProvider):
                     p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
                     p["_from"] = min(p["_from"], minute)
 
-        # team_won a clean_sheet se počítají pouze ze základní hrací doby (goals_timeline_90).
-        # Gól v prodloužení nebo penaltovém rozstřelu výhru ani čisté konto neovlivňuje.
+        # team_won: odvozeno přímo z home_won/away_won (DG/DH metadata = skóre po 90 min).
+        # clean_sheet: z goals_timeline_90 (pouze góly ze základní doby).
         for player in players.values():
             exit_min = player["_to"]
             my_side = player["_side"]
             opp_side = "2" if my_side == "1" else "1"
-            my_goals_90 = sum(1 for m, s in goals_timeline_90 if s == my_side and m <= exit_min)
             opp_goals_90 = sum(1 for m, s in goals_timeline_90 if s == opp_side and m <= exit_min)
-            player["team_won"] = my_goals_90 > opp_goals_90
+            player["team_won"] = home_won if my_side == "1" else away_won
             player["clean_sheet"] = opp_goals_90 == 0
 
