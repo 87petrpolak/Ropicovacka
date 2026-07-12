@@ -445,9 +445,10 @@ class LivesportProvider(BaseFootballDataProvider):
                 }
             return players[key]
 
-        # Časová osa gólů: (minuta, střílející_strana)
-        # Vlastní gól se připíše protivníkovi
-        goals_timeline: list[tuple[int, str]] = []
+        # Časová osa gólů pouze za základní hrací dobu (IC=1 H1, IC=2 H2).
+        # Prodloužení (IC=3 ET1, IC=4 ET2) a rozstřel (IC=5/6/7) se
+        # do této osy nepočítají — team_won a clean_sheet se hodnotí jen po 90 min.
+        goals_timeline_90: list[tuple[int, str]] = []
 
         for block in raw.split("~"):
             if "III÷" not in block:
@@ -468,12 +469,9 @@ class LivesportProvider(BaseFootballDataProvider):
             im_list = kv.get("IM", [])
             ik_list = kv.get("IK", [])
 
-            # Detekce penaltového rozstřelu.
-            # Flashscore označuje period kódem v poli IC:
-            #   1=H1, 2=H2, 3=ET1, 4=ET2, 5/6/7=penalty shootout
-            # Góly z penaltového rozstřelu se nepočítají do herních statistik.
             ic_val = kv.get("IC", [""])[0]
-            is_shootout = ic_val in ("5", "6", "7")
+            is_et = ic_val in ("3", "4")        # prodloužení
+            is_shootout = ic_val in ("5", "6", "7")  # penaltový rozstřel
 
             for i, ik in enumerate(ik_list):
                 name = (if_list[i] if i < len(if_list) else "").strip()
@@ -485,53 +483,42 @@ class LivesportProvider(BaseFootballDataProvider):
 
                 if ik in _INCIDENT_GOALS:
                     if is_shootout:
-                        continue  # Penaltový rozstřel — nepočítáme jako gól
+                        continue  # Penaltový rozstřel — nepočítáme vůbec
                     p = _get_or_create(key, name, pid, team_side)
-                    p["goals"] += 1
-                    goals_timeline.append((minute, team_side))
-                    # Zruš clean_sheet protivníkům kteří byli na hřišti v tuto minutu
-                    opposing_side = "2" if team_side == "1" else "1"
-                    for op in players.values():
-                        if op["_side"] == opposing_side and op["_from"] <= minute <= op["_to"]:
-                            op["clean_sheet"] = False
+                    p["goals"] += 1  # Gól v prodloužení se hráči počítá
+                    if not is_et:
+                        # Do časové osy jen góly ze základní doby (pro team_won/clean_sheet)
+                        goals_timeline_90.append((minute, team_side))
+                        opposing_side = "2" if team_side == "1" else "1"
+                        for op in players.values():
+                            if op["_side"] == opposing_side and op["_from"] <= minute <= op["_to"]:
+                                op["clean_sheet"] = False
 
                 elif ik == _INCIDENT_OWN_GOAL:
-                    # Vlastní gól — přičítá se protivníkovi (skóre pro opačnou stranu)
                     opposing_side = "2" if team_side == "1" else "1"
-                    goals_timeline.append((minute, opposing_side))
-                    for op in players.values():
-                        if op["_side"] == team_side and op["_from"] <= minute <= op["_to"]:
-                            op["clean_sheet"] = False
+                    if not is_et and not is_shootout:
+                        goals_timeline_90.append((minute, opposing_side))
+                        for op in players.values():
+                            if op["_side"] == team_side and op["_from"] <= minute <= op["_to"]:
+                                op["clean_sheet"] = False
 
                 elif ik in ("Asistence", "Asistace"):
                     p = _get_or_create(key, name, pid, team_side)
                     p["assists"] += 1
 
                 elif ik == _INCIDENT_SUB_IN:
-                    # Střídající hráč — nastoupil v minutě, minuty = zbytek zápasu
                     p = _get_or_create(key, name, pid, team_side, from_min=minute)
                     p["minutes_played"] = max(p["minutes_played"], match_duration - minute)
                     p["_from"] = min(p["_from"], minute)
 
-        # Přepočítej team_won i clean_sheet při odchodu každého hráče.
-        # team_won: z goals_timeline (snapshot ve chvíli odchodu).
-        # clean_sheet: ground truth je skóre (home_clean/away_clean); goals_timeline
-        #   slouží jen pro hráče vystřídané před gólem soupeře. Tím se vyhneme
-        #   situaci kde feed obsahuje "Penalta" pro neproměněnou penaltu — ta by
-        #   neoprávněně přidala entry do goals_timeline a zrušila clean_sheet.
+        # team_won a clean_sheet se počítají pouze ze základní hrací doby (goals_timeline_90).
+        # Gól v prodloužení nebo penaltovém rozstřelu výhru ani čisté konto neovlivňuje.
         for player in players.values():
             exit_min = player["_to"]
             my_side = player["_side"]
             opp_side = "2" if my_side == "1" else "1"
-            my_goals = sum(1 for m, s in goals_timeline if s == my_side and m <= exit_min)
-            opp_goals = sum(1 for m, s in goals_timeline if s == opp_side and m <= exit_min)
-            player["team_won"] = my_goals > opp_goals
-            # Finální čisté konto dle skóre (metadata)
-            team_kept_clean = home_clean if my_side == "1" else away_clean
-            if team_kept_clean:
-                # Tým neobdržel gól — hráč má clean_sheet vždy (žádný gól nemohl padnout)
-                player["clean_sheet"] = True
-            else:
-                # Tým gól obdržel — hráč má clean_sheet jen pokud ho opustil před prvním gólem
-                player["clean_sheet"] = opp_goals == 0
+            my_goals_90 = sum(1 for m, s in goals_timeline_90 if s == my_side and m <= exit_min)
+            opp_goals_90 = sum(1 for m, s in goals_timeline_90 if s == opp_side and m <= exit_min)
+            player["team_won"] = my_goals_90 > opp_goals_90
+            player["clean_sheet"] = opp_goals_90 == 0
 

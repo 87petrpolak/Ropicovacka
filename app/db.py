@@ -249,8 +249,9 @@ def _fix_playoff_stats(eng):
             db.commit()
 
         # === Krok B: re-fetchni stats ze Flashscore ===
-        # v2: opravený parser (penalty rozstřel se nepočítá), přidán Švýcarsko vs Kolumbie
-        if not db.get(AppCache, "playoff_fix_stats_v2"):
+        # v3: opravený parser (ET góly neovlivňují team_won/clean_sheet)
+        # Re-fetchuje všechny playoff zápasy v DB kde external_id existuje.
+        if not db.get(AppCache, "playoff_fix_stats_v3"):
             from app.providers.livesport_provider import LivesportProvider
             from app.services.data_refresh import _upsert_stats, _recompute_match_points
             from app.providers.base import RefreshResult
@@ -258,32 +259,27 @@ def _fix_playoff_stats(eng):
             provider = LivesportProvider()
             errors = []
 
-            for label, pairs in [
-                ("Argentina vs Egypt",    [("Argentina", "Egypt"), ("Egypt", "Argentina")]),
-                ("Švýcarsko vs Kolumbie", [("Švýcarsko", "Kolumbie"), ("Kolumbie", "Švýcarsko")]),
-            ]:
-                for home, away in pairs:
-                    m = db.query(Match).filter(
-                        Match.home_team == home, Match.away_team == away,
-                        Match.game_id == game.id, Match.external_id.isnot(None),
-                    ).first()
-                    if m:
-                        try:
-                            r = RefreshResult()
-                            for sd in provider.fetch_player_stats(m.external_id):
-                                _upsert_stats(db, sd, m, r)
-                            _recompute_match_points(db, m, game.id)
-                            db.flush()
-                            print(f"[playoff_fix] {label}: +{r.stats_added} ↺{r.stats_updated}")
-                        except Exception as e:
-                            errors.append(f"{label}: {e}")
-                        break
-                else:
-                    print(f"[playoff_fix] {label}: nenalezen v DB nebo chybí external_id")
+            # Re-fetchni všechny playoff zápasy v DB
+            playoff_matches = db.query(Match).filter(
+                Match.game_id == game.id,
+                Match.external_id.isnot(None),
+                Match.is_finished == True,
+            ).all()
+
+            for m in playoff_matches:
+                try:
+                    r = RefreshResult()
+                    for sd in provider.fetch_player_stats(m.external_id):
+                        _upsert_stats(db, sd, m, r)
+                    _recompute_match_points(db, m, game.id)
+                    db.flush()
+                    print(f"[playoff_fix] {m.home_team} vs {m.away_team}: ↺{r.stats_updated}")
+                except Exception as e:
+                    errors.append(f"{m.home_team} vs {m.away_team}: {e}")
 
             if not errors:
                 db.add(AppCache(
-                    key="playoff_fix_stats_v2",
+                    key="playoff_fix_stats_v3",
                     value="done",
                     updated_at=__import__("datetime").datetime.utcnow(),
                 ))

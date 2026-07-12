@@ -184,18 +184,14 @@ if st.button("🔄 Vynutit refresh zápasů z Flashscore"):
         raw = _fetch_all_from_api()
         _db_set(_CACHE_KEY_ALL, raw)
         st.success(f"Načteno {len(raw)} zápasů z Flashscore a uloženo do cache.")
-        team_count: dict[str, int] = {}
-        for m in raw:
-            for team in [m.get("home", ""), m.get("away", "")]:
-                if team:
-                    team_count[team] = team_count.get(team, 0) + 1
-        for t in ["Francie", "Argentina", "Švýcarsko", "Portugalsko", "Egypt"]:
-            st.write(f"  {t}: {team_count.get(t, 0)} zápasů")
-        # Detail pro Portugalsko
-        pt_matches = [m for m in raw if "Portugalsko" in (m.get("home",""), m.get("away",""))]
-        st.write(f"**Všechny Portugalsko zápasy ({len(pt_matches)}):**")
-        for m in pt_matches:
-            st.write(f"  {m.get('date_str','')} {m.get('home','')} vs {m.get('away','')} (status={m.get('status','')})")
+        playoff = [m for m in raw if m.get("is_playoff")]
+        st.write(f"**Playoff zápasy ({len(playoff)}):**")
+        for m in playoff:
+            st.write(f"  {m.get('date_str','')} {m.get('home','')} vs {m.get('away','')} is_playoff={m.get('is_playoff')}")
+        for t in ["Francie", "Argentina", "Švýcarsko", "Španělsko", "Anglie", "Norsko", "Belgie"]:
+            t_matches = [m for m in raw if t in (m.get("home",""), m.get("away",""))]
+            t_playoff = [m for m in t_matches if m.get("is_playoff")]
+            st.write(f"  {t}: {len(t_matches)} zápasů celkem, {len(t_playoff)} playoff")
     except Exception as e:
         st.error(f"Chyba: {e}")
 
