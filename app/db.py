@@ -227,7 +227,7 @@ def _fix_playoff_stats(eng):
     Krok B (Flashscore): re-fetchni stats pro Argentina vs Egypt.
     Krok C (odvozeno ze skóre): oprav false góly hráčů v zápasech kde jejich tým neskóroval.
     """
-    from app.models.models import AppCache, FootballPlayer, PlayerMatchStats, Game, Match
+    from app.models.models import AppCache, FootballPlayer, PlayerMatchStats, Game, Match, Round
     db = SessionLocal()
     try:
         game = db.query(Game).filter(Game.is_active == True).first()
@@ -348,6 +348,73 @@ def _fix_playoff_stats(eng):
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))
             db.commit()
+
+        # === Krok D: oprav round_number finálového kola a importuj finálové zápasy ===
+        # Kolo "Finále + o 3. místo" má round_number=10, ale týmy odehrají max 8 zápasů
+        # (3 skupiny + 1/16 + osmifinále + čtvrtfinále + semifinále + finále/3.místo).
+        # Cashflow mapuje Nth zápas týmu → round_number, takže musí být 8.
+        if not db.get(AppCache, "playoff_fix_finale_v1"):
+            from app.services.data_refresh import _upsert_stats, _recompute_match_points
+            from app.providers.base import RefreshResult
+            from app.providers.livesport_provider import LivesportProvider
+
+            # Oprav round_number 10 → 8 pro finálové kolo
+            finale_round = db.query(Round).filter(
+                Round.game_id == game.id,
+                Round.round_number == 10,
+            ).first()
+            if finale_round:
+                finale_round.round_number = 8
+                db.flush()
+                print(f"[playoff_fix D] round_number 10→8 pro kolo: {finale_round.name}")
+
+            # Importuj stats pro finálové zápasy ze Flashscore
+            FINALE_MATCHES = [
+                ("Španělsko", "Argentina", "UgbUKPmT"),   # Finále 1-0
+                ("Francie",   "Anglie",    "b9l0F3Bj"),   # O 3. místo 4-6
+            ]
+            provider = LivesportProvider()
+            errors = []
+            for home, away, ext_id in FINALE_MATCHES:
+                m = db.query(Match).filter(
+                    Match.game_id == game.id,
+                    Match.external_id == ext_id,
+                ).first()
+                if not m:
+                    # Zápas ještě není v DB — vytvoř ho
+                    from app.models.models import Match as MatchModel
+                    import datetime as _dt
+                    m = MatchModel(
+                        game_id=game.id,
+                        home_team=home,
+                        away_team=away,
+                        external_id=ext_id,
+                        is_finished=True,
+                        is_playoff=True,
+                        round_id=finale_round.id if finale_round else None,
+                    )
+                    db.add(m)
+                    db.flush()
+                    print(f"[playoff_fix D] Vytvořen zápas: {home} vs {away}")
+                try:
+                    r = RefreshResult()
+                    for sd in provider.fetch_player_stats(ext_id):
+                        _upsert_stats(db, sd, m, r)
+                    _recompute_match_points(db, m, game.id)
+                    db.flush()
+                    print(f"[playoff_fix D] {home} vs {away}: +{r.stats_added} ↺{r.stats_updated}")
+                except Exception as e:
+                    errors.append(f"{home} vs {away}: {e}")
+
+            if not errors:
+                db.add(AppCache(
+                    key="playoff_fix_finale_v1",
+                    value="done",
+                    updated_at=__import__("datetime").datetime.utcnow(),
+                ))
+            db.commit()
+            if errors:
+                print(f"[playoff_fix D] Chyby: {errors}")
 
     except Exception as e:
         db.rollback()

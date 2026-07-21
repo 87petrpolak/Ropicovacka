@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 from app.state import get_db, require_active_game
-from app.models.models import Round, Participant, LineupNomination, DraftSession
+from app.models.models import Round, Participant, LineupNomination, DraftSession, Game, FootballPlayer, DraftPick, TournamentPrediction
 from app.services.lineup_manager import lock_lineup, admin_unlock_lineup
 
 st.title("Administrace")
@@ -595,3 +595,71 @@ if st.button("➕ Přidat playoff posily do kádru", type="primary"):
     except Exception as e:
         db.rollback()
         st.error(f"Chyba: {e}")
+
+# ----------------------------------------------------------------
+# Vyhodnocení tipovačky
+# ----------------------------------------------------------------
+st.divider()
+st.subheader("🎯 Vyhodnocení tipovačky")
+
+game = db.get(Game, game_id)
+participants_all = db.query(Participant).filter(Participant.game_id == game_id).order_by(Participant.draft_order).all()
+
+# Všichni draftovaní hráči pro výběr střelce
+session_tip = db.query(DraftSession).filter(DraftSession.game_id == game_id).order_by(DraftSession.id.desc()).first()
+drafted_player_ids = set()
+if session_tip:
+    drafted_player_ids = {pick.player_id for pick in db.query(DraftPick).filter(DraftPick.session_id == session_tip.id).all()}
+drafted_players = db.query(FootballPlayer).filter(FootballPlayer.id.in_(drafted_player_ids)).order_by(FootballPlayer.name).all() if drafted_player_ids else []
+
+all_countries = sorted({p.club or p.country for p in db.query(FootballPlayer).all() if p.club or p.country})
+
+col_w, col_s = st.columns(2)
+
+with col_w:
+    st.markdown("**🏆 Skutečný vítěz MS**")
+    winner_opts = ["— nevybráno —"] + all_countries
+    cur_w_idx = 0
+    if game and game.actual_winner and game.actual_winner in all_countries:
+        cur_w_idx = all_countries.index(game.actual_winner) + 1
+    sel_w = st.selectbox("Vítěz", range(len(winner_opts)), index=cur_w_idx,
+                         format_func=lambda i: winner_opts[i], key="admin_actual_winner",
+                         label_visibility="collapsed")
+    actual_winner_val = winner_opts[sel_w] if sel_w > 0 else None
+
+with col_s:
+    st.markdown("**⚽ Skutečný nejlepší střelec**")
+    scorer_opts = [None] + [p.id for p in drafted_players]
+    scorer_labels = ["— nevybráno —"] + [f"{p.name} ({p.country})" for p in drafted_players]
+    cur_s_idx = 0
+    if game and game.actual_top_scorer_id:
+        try:
+            cur_s_idx = scorer_opts.index(game.actual_top_scorer_id)
+        except ValueError:
+            pass
+    sel_s = st.selectbox("Střelec", range(len(scorer_opts)), index=cur_s_idx,
+                         format_func=lambda i: scorer_labels[i], key="admin_actual_scorer",
+                         label_visibility="collapsed")
+    actual_scorer_val = scorer_opts[sel_s]
+
+if st.button("💾 Uložit výsledky turnaje", type="primary"):
+    game.actual_winner = actual_winner_val
+    game.actual_top_scorer_id = actual_scorer_val
+    db.commit()
+    st.success("✅ Výsledky uloženy! Tipovačka se zobrazí v dashboardu.")
+    st.rerun()
+
+# Přehled tipů vs skutečnost
+preds_all = db.query(TournamentPrediction).filter(TournamentPrediction.game_id == game_id).all()
+if preds_all:
+    st.caption("Aktuální tipy účastníků:")
+    tip_data = []
+    for p in participants_all:
+        pr = next((x for x in preds_all if x.participant_id == p.id), None)
+        scorer_player = db.get(FootballPlayer, pr.top_scorer_player_id) if pr and pr.top_scorer_player_id else None
+        tip_data.append({
+            "Účastník": p.name,
+            "Vítěz": pr.winner_country if pr else "—",
+            "Střelec": scorer_player.name if scorer_player else "—",
+        })
+    st.dataframe(pd.DataFrame(tip_data), use_container_width=True, hide_index=True)

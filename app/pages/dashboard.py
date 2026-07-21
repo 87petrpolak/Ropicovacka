@@ -2,8 +2,8 @@
 import pandas as pd
 import streamlit as st
 from app.state import get_db, require_active_game
-from app.models.models import Participant, LineupNomination, LineupSlot, FootballPlayer, PlayerMatchStats, Match, Round
-from app.services.cashflow import compute_events, compute_balances, cashflow_per_event, EVENT_LABELS
+from app.models.models import Participant, LineupNomination, LineupSlot, FootballPlayer, PlayerMatchStats, Match, Round, Game, TournamentPrediction
+from app.services.cashflow import compute_events, compute_balances, cashflow_per_event, compute_prediction_balances, EVENT_LABELS
 
 
 
@@ -48,9 +48,13 @@ if not participants:
 
 events = compute_events(db, game_id)
 balances = compute_balances(events, participants)
+pred_balances = compute_prediction_balances(db, game_id, participants)
+
+# Sloučení bilancí (zápasy + tipovačka)
+total_balances = {p.id: balances[p.id] + pred_balances[p.id] for p in participants}
 
 # Ověření zero-sum (debug)
-total = sum(balances.values())
+total = sum(total_balances.values())
 
 # ----------------------------------------------------------------
 # SEKCE 1: Aktuální stav
@@ -59,7 +63,7 @@ st.subheader("Aktuální stav")
 
 cols = st.columns(len(participants))
 for i, p in enumerate(participants):
-    bal = balances[p.id]
+    bal = total_balances[p.id]
     icon = "🟢" if bal > 0 else ("🔴" if bal < 0 else "⚪")
     cols[i].metric(label=p.name, value=f"{bal:+.0f} Kč")
     cols[i].markdown(f"<div style='text-align:center;font-size:1.8rem'>{icon}</div>", unsafe_allow_html=True)
@@ -225,4 +229,46 @@ if not my_events_round and not zero_rows:
         st.info(f"Pro {sel_round.name} zatím není uložena nominace.")
     else:
         st.info("Žádné odehrané zápasy v tomto kole.")
-    st.metric("Celkový zůstatek", f"{balances[sel_p.id]:+.0f} Kč")
+    st.metric("Celkový zůstatek", f"{total_balances[sel_p.id]:+.0f} Kč")
+
+# ----------------------------------------------------------------
+# SEKCE 4: Tipovačka — vyhodnocení
+# ----------------------------------------------------------------
+game = db.get(Game, game_id)
+if game and (game.actual_winner or game.actual_top_scorer_id):
+    st.divider()
+    st.subheader("🎯 Tipovačka — vyhodnocení")
+
+    preds = db.query(TournamentPrediction).filter(TournamentPrediction.game_id == game_id).all()
+    pred_map = {p.participant_id: p for p in preds}
+
+    tip_rows = []
+    for category, label, actual_val, get_tip in [
+        ("winner", "🏆 Vítěz MS", game.actual_winner,
+         lambda pr: pr.winner_country if pr else None),
+        ("top_scorer", "⚽ Nejlepší střelec",
+         db.get(FootballPlayer, game.actual_top_scorer_id).name if game.actual_top_scorer_id and db.get(FootballPlayer, game.actual_top_scorer_id) else None,
+         lambda pr: db.get(FootballPlayer, pr.top_scorer_player_id).name if pr and pr.top_scorer_player_id and db.get(FootballPlayer, pr.top_scorer_player_id) else None),
+    ]:
+        if not actual_val:
+            continue
+        row = {"Kategorie": label, "Skutečnost": actual_val}
+        for p in participants:
+            pr = pred_map.get(p.id)
+            tip = get_tip(pr)
+            delta = pred_balances[p.id]  # souhrnně, ne per-kategorie
+            hit = tip == actual_val
+            row[p.name] = f"{'✅' if hit else '❌'} {tip or '—'}"
+        tip_rows.append(row)
+
+    if tip_rows:
+        st.dataframe(pd.DataFrame(tip_rows), use_container_width=True, hide_index=True)
+
+    # Výplata tipovačky
+    pred_cols = st.columns(len(participants))
+    for i, p in enumerate(participants):
+        bal = pred_balances[p.id]
+        if abs(bal) > 0.01:
+            pred_cols[i].metric(p.name, f"{bal:+.0f} Kč", delta_color="normal")
+        else:
+            pred_cols[i].metric(p.name, "0 Kč")
