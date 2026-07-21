@@ -417,22 +417,41 @@ def _fix_playoff_stats(eng):
                 print(f"[playoff_fix D] Chyby: {errors}")
 
         # === Krok E: nastav skutečné výsledky turnaje (vítěz + nejlepší střelec) ===
-        if not db.get(AppCache, "playoff_fix_results_v1"):
+        if not db.get(AppCache, "playoff_fix_results_v2"):
+            from app.models.models import TournamentPrediction
             # Vítěz MS: Španělsko
             game.actual_winner = "Španělsko"
 
-            # Nejlepší střelec: Mbappé Kylian (Francie)
-            mbappe = db.query(FootballPlayer).filter(
-                FootballPlayer.name.ilike("%Mbapp%")
-            ).first()
-            if mbappe:
-                game.actual_top_scorer_id = mbappe.id
-                print(f"[playoff_fix E] Top scorer: {mbappe.name} (id={mbappe.id})")
-            else:
-                print("[playoff_fix E] Mbappé nenalezen v DB!")
+            # Nejlepší střelec: Mbappé — hledáme přes tipy účastníků (ID musí sedět s tipem Saši).
+            # Priorita: tip který ukazuje na hráče jehož jméno obsahuje "Mbapp".
+            # Tím se vyhneme neshodě ID mezi drafted playerem a hráčem z import stats.
+            mbappe_id = None
+            all_preds = db.query(TournamentPrediction).filter(
+                TournamentPrediction.game_id == game.id,
+                TournamentPrediction.top_scorer_player_id.isnot(None),
+            ).all()
+            for pred in all_preds:
+                fp = db.get(FootballPlayer, pred.top_scorer_player_id)
+                if fp and "bapp" in fp.name.lower():
+                    mbappe_id = fp.id
+                    print(f"[playoff_fix E] Top scorer z tipu: {fp.name} (id={fp.id})")
+                    break
+
+            if mbappe_id is None:
+                # Fallback: hledej přímo v tabulce hráčů
+                fp = db.query(FootballPlayer).filter(
+                    FootballPlayer.name.ilike("%Mbapp%")
+                ).first()
+                if fp:
+                    mbappe_id = fp.id
+                    print(f"[playoff_fix E] Top scorer z DB: {fp.name} (id={fp.id})")
+                else:
+                    print("[playoff_fix E] Mbappé nenalezen!")
+
+            game.actual_top_scorer_id = mbappe_id
 
             db.add(AppCache(
-                key="playoff_fix_results_v1",
+                key="playoff_fix_results_v2",
                 value="done",
                 updated_at=__import__("datetime").datetime.utcnow(),
             ))
