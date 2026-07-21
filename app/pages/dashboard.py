@@ -100,11 +100,55 @@ def _build_event_rows(evs: list[dict], participants: list) -> list[dict]:
     return rows
 
 
+def _build_prediction_rows(db, game_id: int, participants: list, pred_balances: dict) -> list[dict]:
+    """Řádky tipovačky do tabulky Co se dělo."""
+    rows = []
+    game = db.get(Game, game_id)
+    if not game or (not game.actual_winner and not game.actual_top_scorer_id):
+        return rows
+    preds = db.query(TournamentPrediction).filter(TournamentPrediction.game_id == game_id).all()
+    pred_map = {p.participant_id: p for p in preds}
+    others = len(participants) - 1
+
+    for label, actual_id, get_name, get_tip_id in [
+        ("🎯 Nejlepší střelec",
+         game.actual_top_scorer_id,
+         lambda: db.get(FootballPlayer, game.actual_top_scorer_id).name if game.actual_top_scorer_id and db.get(FootballPlayer, game.actual_top_scorer_id) else None,
+         lambda pr: pr.top_scorer_player_id if pr else None),
+        ("🏆 Vítěz MS",
+         game.actual_winner,
+         lambda: game.actual_winner,
+         lambda pr: pr.winner_country if pr else None),
+    ]:
+        actual_name = get_name()
+        if not actual_name:
+            continue
+        correct = [p for p in participants if get_tip_id(pred_map.get(p.id)) == actual_id]
+        wrong = [p for p in participants if p not in correct]
+        if not correct or not wrong:
+            continue
+        row = {
+            "Zápas": "Tipovačka",
+            "Hráč": actual_name,
+            "Post": "—",
+            "Vlastník": ", ".join(p.name for p in correct),
+            "Event": label,
+        }
+        for p in participants:
+            if p in correct:
+                row[p.name] = f"+{50 * len(wrong):.0f} Kč"
+            else:
+                row[p.name] = f"-{50 * len(correct):.0f} Kč"
+        rows.append(row)
+    return rows
+
+
 if not events:
     st.info("Zatím žádné body. Importuj výsledky zápasů.")
 else:
     sorted_events = sorted(events, key=lambda e: (e["match"].played_at or "", -e["event_value"]), reverse=True)
-    st.dataframe(pd.DataFrame(_build_event_rows(sorted_events, participants)), use_container_width=True, hide_index=True)
+    all_rows = _build_event_rows(sorted_events, participants) + _build_prediction_rows(db, game_id, participants, pred_balances)
+    st.dataframe(pd.DataFrame(all_rows), use_container_width=True, hide_index=True)
 
 st.divider()
 
