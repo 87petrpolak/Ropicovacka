@@ -7,8 +7,13 @@ from app.services.cashflow import compute_events, compute_balances, cashflow_per
 
 
 
-col_title, col_btn = st.columns([4, 1])
+col_title, col_btn, col_xls = st.columns([4, 1, 1])
 col_title.title("Dashboard")
+
+with col_xls:
+    st.markdown("<div style='margin-top:1.5rem'>", unsafe_allow_html=True)
+    _xls_placeholder = st.empty()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col_btn:
     st.markdown("<div style='margin-top:1.5rem'>", unsafe_allow_html=True)
@@ -149,6 +154,24 @@ else:
     sorted_events = sorted(events, key=lambda e: (e["match"].played_at or "", -e["event_value"]), reverse=True)
     all_rows = _build_event_rows(sorted_events, participants) + _build_prediction_rows(db, game_id, participants, pred_balances)
     st.dataframe(pd.DataFrame(all_rows), use_container_width=True, hide_index=True)
+
+    # Excel export
+    import io
+    def _make_excel(rows, participants, total_balances):
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            pd.DataFrame(rows).to_excel(writer, sheet_name="Eventy", index=False)
+            summary = [{"Účastník": p.name, "Celkem (Kč)": total_balances[p.id]} for p in participants]
+            pd.DataFrame(summary).to_excel(writer, sheet_name="Souhrn", index=False)
+        return buf.getvalue()
+
+    xls_bytes = _make_excel(all_rows, participants, total_balances)
+    _xls_placeholder.download_button(
+        "📥 Excel", data=xls_bytes,
+        file_name="ropicovacka_2026.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
 
 st.divider()
 
