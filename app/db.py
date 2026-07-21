@@ -416,6 +416,28 @@ def _fix_playoff_stats(eng):
             if errors:
                 print(f"[playoff_fix D] Chyby: {errors}")
 
+        # === Krok E: nastav skutečné výsledky turnaje (vítěz + nejlepší střelec) ===
+        if not db.get(AppCache, "playoff_fix_results_v1"):
+            # Vítěz MS: Španělsko
+            game.actual_winner = "Španělsko"
+
+            # Nejlepší střelec: Mbappé Kylian (Francie)
+            mbappe = db.query(FootballPlayer).filter(
+                FootballPlayer.name.ilike("%Mbapp%")
+            ).first()
+            if mbappe:
+                game.actual_top_scorer_id = mbappe.id
+                print(f"[playoff_fix E] Top scorer: {mbappe.name} (id={mbappe.id})")
+            else:
+                print("[playoff_fix E] Mbappé nenalezen v DB!")
+
+            db.add(AppCache(
+                key="playoff_fix_results_v1",
+                value="done",
+                updated_at=__import__("datetime").datetime.utcnow(),
+            ))
+            db.commit()
+
     except Exception as e:
         db.rollback()
         print(f"[playoff_fix] Kritická chyba: {e}")
